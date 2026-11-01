@@ -40,6 +40,31 @@ The configured ELF retains `__libc_init_array` (72 bytes), which startup calls f
 
 ## Source review: storage, UI, and peripheral setup
 
+### Linked-file ranking
+
+Baseline map input ranges were merged before summing, because pooled strings overlap and summing raw map sizes overcounts Flash. Ranked contributions below include initialized RAM's Flash load image; 48 bytes of alignment complete the 61,280-byte load span.
+
+| Linked object or archive member | Flash bytes |
+| --- | ---: |
+| LTO combined application/HAL object | 58,826 |
+| libgcc unsigned 64-bit division object | 764 |
+| dso_capture.o | 532 |
+| dso_fault_entry.o | 472 |
+| startup_stm32f103c8tx.o | 342 |
+| crtbegin.o | 72 |
+| Newlib initialization | 72 |
+| libgcc division ABI veneer | 48 |
+| memcmp | 32 |
+| memcpy | 28 |
+| memset | 16 |
+| crtn.o | 16 |
+| crti.o | 8 |
+| libgcc division fault support | 4 |
+
+LTO combines source files, so the first row cannot honestly be presented as an additive ranking of original C++ modules. Its largest code symbols guide source investigation instead: application idle (9,136 bytes), storage service (3,672), main (3,668), scene formatting (3,576), acquisition arming (2,058), global initialization (1,740), storage step (1,376), and raster span (1,152). These are optimization targets, not evidence that their work is unnecessary. The remaining memory library functions total only 76 bytes; replacing them offers little headroom and would add maintenance cost.
+
+The linked image has no allocator, global new/delete, RTTI/vtables, formatted I/O, or C++ exception runtime symbols. Unused HAL input sections are discarded; merely excluding their source files does not establish any Flash saving. Required HAL code is also inlined into application functions, so an out-of-line HAL symbol list is not its full cost.
+
 Independent source reviews found that the storage service's payload-read and publishing loops have deliberately different work budgets. They must not be combined merely to shorten source. Calibration import validates the entire record before mutating the calibration bank; merging those passes would change failure atomicity. Neither change is proposed.
 
 UI label mappings and initialization guards contain apparent repetition, but source inspection alone does not prove duplicated machine code. The analog-power and test-output clock predicates appear equivalent; other drivers enforce different conditions. A common clock helper is not accepted without a full-image saving. Acquisition preparation already shares backend setup, and unused HAL sections are eligible for linker garbage collection.
@@ -53,3 +78,15 @@ The outlining review confirmed that `arm`, `redraw`, and `service_storage` alrea
 The Tail phase now leaves its 32-byte scratch buffer uninitialized. A successful selected-calibration read fills the requested bytes, the CRC consumes only those bytes, and a failed read returns before consumption. The STM32 storage reader writes every requested output byte on success. Restoring a calibration bank uses the existing DMA staging buffer instead.
 
 An isolated configured Release build reduced text by 16 bytes with unchanged read-only data and static RAM, reducing the load span from 61,280 to 61,264 bytes and increasing application headroom from 160 to 176 bytes. Disassembly removes the Tail-path memset call and setup; the function stack frame is unchanged. Existing native storage-UI and calibration-persistence-UI suites passed against the candidate, covering partial-read failure isolation, malformed records, reboot/restore and staged publication. This demonstrates removal of work on that path; no hardware timing measurement or deployment has been performed.
+
+## Accepted: compact UI label selection
+
+Four switch helpers replace inline ternary ladders for storage action/status, calibration action, and measurement page labels. All labels and invalid-enum fallbacks are preserved. LTO emits no additional helper calls; the scene-formatting frame remains 192 bytes. Independently this saves 40 bytes (80 less text, 40 more read-only data).
+
+A configured build combining these helpers and the scratch change has a 61,224-byte load span, ending at 0x0800EF28: 56 bytes saved against baseline and 216 bytes of application headroom. Static RAM and the inspected idle/main/scene/storage stack frames are unchanged. Existing native controller UI, storage UI, and calibration-persistence UI suites passed using the complete candidate production source set. These are software results; the candidate has not been flashed or timed on hardware.
+
+## Additional consolidation candidates
+
+Sharing base capture-field validation between acquisition and saved-record decoding passed six relevant native suites, but a clean target comparison produced identical section sizes and a 61,280-byte span. The differing Auto-timeout policies remained separate. This refactor was not adopted as a footprint optimization.
+
+Sharing signed rounding across scaling, measurements, and calibration saved 160 bytes in an isolated target build and passed six numeric suites. However, LTO introduced calls in foreground projection, a 16-byte helper frame, and an increased idle frame. That candidate is unaccepted pending evaluation of an inline variant and its performance consequences.

@@ -103,6 +103,49 @@ const char* coupling_name(InputCoupling coupling) noexcept
     return coupling == InputCoupling::Dc ? "DC" : coupling == InputCoupling::Ac ? "AC" :
         coupling == InputCoupling::Ground ? "GND" : "?";
 }
+const char* storage_action_name(StorageAction action) noexcept
+{
+    switch (action) {
+    case StorageAction::SaveWaveform: return "SAVE WAVE";
+    case StorageAction::RecallWaveform: return "RECALL WAVE";
+    case StorageAction::SaveSettings: return "SAVE CONFIG";
+    case StorageAction::RestoreSettings: return "LOAD CONFIG";
+    case StorageAction::SaveCalibration: return "SAVE CAL";
+    default: return "RESTORE CAL";
+    }
+}
+const char* storage_status_name(UiStorageStatus status) noexcept
+{
+    switch (status) {
+    case UiStorageStatus::Disabled: return "DISABLED";
+    case UiStorageStatus::Saved: return "SAVED";
+    case UiStorageStatus::Recalled: return "RECALLED";
+    case UiStorageStatus::Restored: return "RESTORED";
+    case UiStorageStatus::Empty: return "EMPTY";
+    case UiStorageStatus::Error: return "ERROR";
+    case UiStorageStatus::ReadOnly: return "READ ONLY";
+    case UiStorageStatus::HoldRequired: return "HOLD TO SAVE";
+    default: return "READY";
+    }
+}
+const char* calibration_action_name(CalibrationAction action) noexcept
+{
+    switch (action) {
+    case CalibrationAction::Begin: return "BEGIN";
+    case CalibrationAction::AcceptReference: return "ACCEPT REF";
+    case CalibrationAction::Install: return "INSTALL";
+    default: return "ABORT";
+    }
+}
+const char* measurement_view_name(MeasurementView view) noexcept
+{
+    switch (view) {
+    case MeasurementView::Overview: return "OVERVIEW";
+    case MeasurementView::Amplitude: return "AMPLITUDE";
+    case MeasurementView::Rms: return "RMS/MEAN";
+    default: return "FREQ";
+    }
+}
 bool same_physical(const PhysicalSettings& a, const PhysicalSettings& b) noexcept
 {
     return a.generation == b.generation && a.microvolts_per_div == b.microvolts_per_div && a.coupling == b.coupling;
@@ -987,25 +1030,15 @@ void ScopeController::format_scene() noexcept
     case UiFocus::VerticalPosition: focus.add("VERT ").signed_number(settings.vertical_offset_pixels).add("px"); scene.highlight = ScreenHighlight::Position; break;
     case UiFocus::HorizontalPosition: focus.add("PAN ").signed_number(settings.horizontal_offset_samples).add(" samples"); scene.highlight = ScreenHighlight::Position; break;
     case UiFocus::Measurements:
-        focus.add("MEAS ").add(settings.measurement_view == MeasurementView::Overview ? "OVERVIEW" :
-            settings.measurement_view == MeasurementView::Amplitude ? "AMPLITUDE" :
-            settings.measurement_view == MeasurementView::Rms ? "RMS/MEAN" : "FREQ");
+        focus.add("MEAS ").add(measurement_view_name(settings.measurement_view));
         if (settings.measurement_view == MeasurementView::Amplitude && measurements() != nullptr && measurements()->amplitude_valid) {
             focus.add(" PK "); voltage(focus, static_cast<std::int64_t>(measurements()->peak_microvolts));
         }
         focus.add(" +/- page");
         break;
     case UiFocus::Storage:
-        focus.add("STORE ").add(ui_.storage_action() == StorageAction::SaveWaveform ? "SAVE WAVE" :
-            ui_.storage_action() == StorageAction::RecallWaveform ? "RECALL WAVE" :
-            ui_.storage_action() == StorageAction::SaveSettings ? "SAVE CONFIG" :
-            ui_.storage_action() == StorageAction::RestoreSettings ? "LOAD CONFIG" :
-            ui_.storage_action() == StorageAction::SaveCalibration ? "SAVE CAL" : "RESTORE CAL");
-        focus.add("  ").add(storage_status_ == UiStorageStatus::Disabled ? "DISABLED" :
-            storage_status_ == UiStorageStatus::Saved ? "SAVED" : storage_status_ == UiStorageStatus::Recalled ? "RECALLED" :
-            storage_status_ == UiStorageStatus::Restored ? "RESTORED" : storage_status_ == UiStorageStatus::Empty ? "EMPTY" :
-            storage_status_ == UiStorageStatus::Error ? "ERROR" : storage_status_ == UiStorageStatus::ReadOnly ? "READ ONLY" :
-            storage_status_ == UiStorageStatus::HoldRequired ? "HOLD TO SAVE" : "READY");
+        focus.add("STORE ").add(storage_action_name(ui_.storage_action()));
+        focus.add("  ").add(storage_status_name(storage_status_));
         break;
     case UiFocus::CalibrationReference:
         focus.add("REF ").signed_number(ui_.reference_microvolts()).add("uV STEP ").number(ui_.calibration_edit_step()).add("uV");
@@ -1014,9 +1047,7 @@ void ScopeController::format_scene() noexcept
         focus.add("TOL ").number(ui_.tolerance_microvolts()).add("uV STEP ").number(ui_.calibration_edit_step()).add("uV");
         break;
     case UiFocus::Calibration:
-        focus.add("CAL ").add(ui_.calibration_action() == CalibrationAction::Begin ? "BEGIN" :
-            ui_.calibration_action() == CalibrationAction::AcceptReference ? "ACCEPT REF" :
-            ui_.calibration_action() == CalibrationAction::Install ? "INSTALL" : "ABORT");
+        focus.add("CAL ").add(calibration_action_name(ui_.calibration_action()));
         focus.add("  ").add(calibration_stage(calibration_session_.state()));
         break;
     default: break;
