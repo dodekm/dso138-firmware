@@ -4,6 +4,9 @@
 namespace dso {
 namespace {
 constexpr std::uint64_t Q32{std::uint64_t{1U} << 32U};
+static_assert(CaptureCapacity <= 1024U, "Q32 measurement denominator proof assumes at most 1024 samples");
+static_assert(std::uint64_t{AdcMax} * AdcMax * Q32 + 2U < (std::uint64_t{1U} << 56U),
+              "12-bit ADC Q32 RMS values, including calibration rounding, must fit the bounded root domain");
 
 std::uint64_t frequency_rates(std::uint64_t numerator, std::uint64_t denominator,
                               std::uint64_t& millihertz) noexcept
@@ -44,15 +47,24 @@ std::uint64_t rational_q32(std::uint64_t numerator, std::uint64_t denominator) n
     return (numerator / denominator) * Q32 + (numerator % denominator) * Q32 / denominator;
 }
 
-std::uint32_t square_root(std::uint64_t value) noexcept
+std::uint32_t square_root_code_q32(std::uint64_t value) noexcept
 {
-    // Restoring integer square root; exactly32 iterations, no libm/float.
-    std::uint64_t root{};
-    for (auto bit = std::uint64_t{1U} << 62U; bit != 0U; bit >>= 2U) {
-        if (value >= root + bit) { value -= root + bit; root = (root >> 1U) + bit; }
-        else { root >>= 1U; }
+    // All callers pass a Q32 mean square in code units. For raw RMS and AC RMS,
+    // it is at most AdcMax^2*Q32. For calibrated RMS, valid zero_code_q16 lies
+    // in [0,AdcMax*65536], so each sample's offset magnitude is <=AdcMax; the
+    // rational and signed correction truncations add less than 2 Q32 units.
+    // Thus every input is below 2^56. Consume 28 base-4 digits: root<2^28,
+    // stored remainder<2^29, and the next shifted remainder<2^31. The trial
+    // is below 2^29; all intermediates fit uint32_t.
+    std::uint32_t root{}, remainder{};
+    for (unsigned digit = 0U; digit < 28U; ++digit) {
+        remainder = (remainder << 2U) | static_cast<std::uint32_t>((value >> 54U) & 3U);
+        value <<= 2U;
+        root <<= 1U;
+        const auto trial = (root << 1U) | 1U;
+        if (remainder >= trial) { remainder -= trial; ++root; }
     }
-    return static_cast<std::uint32_t>(root);
+    return root;
 }
 
 std::int64_t rounded_signed(std::int64_t numerator, std::uint64_t denominator) noexcept
@@ -128,9 +140,9 @@ void MeasurementEngine::finish_statistics() noexcept
     const auto n = std::uint64_t{result_.count};
     result_.peak_to_peak_codes = static_cast<std::uint16_t>(result_.maximum_code - result_.minimum_code);
     result_.mean_code_q16 = static_cast<std::uint32_t>((std::uint64_t{sum_} * 65536U + n / 2U) / n);
-    result_.rms_code_q16 = square_root(rational_q32(sum_squares_, n));
+    result_.rms_code_q16 = square_root_code_q32(rational_q32(sum_squares_, n));
     const auto variance = n * sum_squares_ - std::uint64_t{sum_} * sum_;
-    result_.ac_rms_code_q16 = square_root(rational_q32(variance, n * n));
+    result_.ac_rms_code_q16 = square_root_code_q32(rational_q32(variance, n * n));
     result_.adc_clipped = result_.rail_low_samples != 0U || result_.rail_high_samples != 0U ||
         result_.source_clipped || result_.filter_clamped;
     result_.amplitude_valid = result_.voltage_available && !result_.adc_clipped;
@@ -159,7 +171,7 @@ void MeasurementEngine::finish_statistics() noexcept
         const auto correction_quotient = static_cast<std::int64_t>(correction_magnitude / n);
         const auto correction = correction_numerator < 0 ? -correction_quotient : correction_quotient;
         const auto mean_square = static_cast<std::int64_t>(rational_q32(centered_squares, n)) - correction + fraction * fraction;
-        result_.rms_microvolts = scaled_rms(square_root(static_cast<std::uint64_t>(mean_square < 0 ? 0 : mean_square)), calibration_);
+        result_.rms_microvolts = scaled_rms(square_root_code_q32(static_cast<std::uint64_t>(mean_square < 0 ? 0 : mean_square)), calibration_);
     }
 
     // Conservative frequency validity order. Rail evidence always suppresses a

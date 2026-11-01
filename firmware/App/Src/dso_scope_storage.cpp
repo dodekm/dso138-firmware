@@ -80,7 +80,7 @@ bool ScopeStorage::begin_open() noexcept
     if (state_ == ScopeStorageState::Disabled) { error_ = ScopeStorageError::Disabled; return false; }
     if (state_ == ScopeStorageState::Opening || state_ == ScopeStorageState::Saving) { return false; }
     published_ = false; unsupported_ = false; result_ = ScopeStorageResult::None;
-    error_ = ScopeStorageError::None; samples_ = {}; calibration_ = {}; candidate_bank_ = 0U; chosen_bank_ = StorageBankCount;
+    error_ = ScopeStorageError::None; samples_ = {}; calibration_ = {};
     if (!journal_.begin_scan()) { fail(ScopeStorageError::Journal); return false; }
     phase_ = Phase::Scan; state_ = ScopeStorageState::Opening; return true;
 }
@@ -150,9 +150,9 @@ bool ScopeStorage::produce(void* context, std::uint16_t offset, std::uint8_t* ou
 
 void ScopeStorage::candidate_valid() noexcept
 {
-    const auto* candidate = journal_.candidate(candidate_bank_);
-    if (candidate != nullptr) { chosen_bank_ = candidate_bank_; }
-    next_candidate();
+    // header_ may contain the calibration scratch bytes. Re-read and validate
+    // the selected header before publishing it, even with only one bank.
+    phase_ = Phase::FinalHeader; offset_ = 0U;
 }
 
 void ScopeStorage::samples_valid() noexcept
@@ -171,26 +171,16 @@ void ScopeStorage::inspect_header(const StorageRecord& candidate) noexcept
         error_ = unsupported_ ? ScopeStorageError::UnsupportedFormat : ScopeStorageError::None;
     } else if (!decoded) {
         if (!supported_header(header_)) { unsupported_ = true; }
-        next_candidate();
+        reject_candidate();
     } else if (!record_.waveform_present) { samples_valid(); }
     else { phase_ = Phase::CandidateSamples; offset_ = 0U; }
 }
 
-void ScopeStorage::finish_candidates() noexcept
+void ScopeStorage::reject_candidate() noexcept
 {
-    if (chosen_bank_ >= StorageBankCount) {
-        state_ = ScopeStorageState::Ready;
-        result_ = journal_.result() == StorageResult::Empty ? ScopeStorageResult::Empty : ScopeStorageResult::NoValidRecord;
-        error_ = unsupported_ ? ScopeStorageError::UnsupportedFormat : ScopeStorageError::None;
-        return;
-    }
-    phase_ = Phase::FinalHeader; offset_ = 0U;
-}
-
-void ScopeStorage::next_candidate() noexcept
-{
-    ++candidate_bank_; offset_ = 0U; phase_ = Phase::CandidateHeader;
-    if (candidate_bank_ >= StorageBankCount) { finish_candidates(); }
+    state_ = ScopeStorageState::Ready;
+    result_ = journal_.result() == StorageResult::Empty ? ScopeStorageResult::Empty : ScopeStorageResult::NoValidRecord;
+    error_ = unsupported_ ? ScopeStorageError::UnsupportedFormat : ScopeStorageError::None;
 }
 
 bool ScopeStorage::read_selected_sample(std::uint16_t index, std::uint16_t& sample) const noexcept
@@ -260,11 +250,10 @@ ScopeStorageStep ScopeStorage::step(std::uint16_t word_budget) noexcept
         }
     }
     while (state_ == ScopeStorageState::Opening && phase_ != Phase::Scan && progress.words < word_budget) {
-        const auto bank = phase_ == Phase::FinalHeader ? chosen_bank_ : candidate_bank_;
-        const auto* candidate = journal_.candidate(bank);
+        const auto* candidate = journal_.candidate(0U);
         if (candidate == nullptr) {
             if (phase_ == Phase::FinalHeader) { fail(ScopeStorageError::Journal); break; }
-            next_candidate(); continue;
+            reject_candidate(); continue;
         }
         if (phase_ == Phase::CandidatePrefix) {
             const auto remaining = static_cast<std::uint16_t>(6U - offset_);
@@ -280,7 +269,7 @@ ScopeStorageStep ScopeStorage::step(std::uint16_t word_budget) noexcept
             // Classify the nested format before current metadata/sample/length
             // semantics can discard it. Future bank formats remain protected
             // even when a waveform sample is bad or the future extent differs.
-            if (!supported_calibration(header_.data() + SavedRecordHeaderBytes)) { unsupported_ = true; next_candidate(); }
+            if (!supported_calibration(header_.data() + SavedRecordHeaderBytes)) { unsupported_ = true; reject_candidate(); }
             else { inspect_header(*candidate); }
             continue;
         }
@@ -289,7 +278,7 @@ ScopeStorageStep ScopeStorage::step(std::uint16_t word_budget) noexcept
             if (!read_journal_sample(journal_, *candidate, record_, little16(header_.data() + 4U) == 4U, offset_, sample)) {
                 fail(ScopeStorageError::ReadFailure); break;
             }
-            if (sample > AdcMax) { next_candidate(); continue; }
+            if (sample > AdcMax) { reject_candidate(); continue; }
             ++offset_;
             if (offset_ == record_.frame.capture.length) { samples_valid(); }
             continue;
@@ -306,8 +295,8 @@ ScopeStorageStep ScopeStorage::step(std::uint16_t word_budget) noexcept
             }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
             if (offset_ != record_.calibration_bytes) { continue; }
-            if (!supported_calibration(header_.data())) { unsupported_ = true; next_candidate(); }
-            else if (!calibration_record_valid(header_.data(), record_.calibration_bytes, board_identity_)) { next_candidate(); }
+            if (!supported_calibration(header_.data())) { unsupported_ = true; reject_candidate(); }
+            else if (!calibration_record_valid(header_.data(), record_.calibration_bytes, board_identity_)) { reject_candidate(); }
             else { candidate_valid(); }
             continue;
         }
@@ -327,13 +316,13 @@ ScopeStorageStep ScopeStorage::step(std::uint16_t word_budget) noexcept
         if (required < SavedRecordHeaderBytes) {
             if (phase_ == Phase::FinalHeader) { fail(ScopeStorageError::Journal); break; }
             if (required < 8U || !supported_header(header_)) { unsupported_ = true; }
-            next_candidate(); continue;
+            reject_candidate(); continue;
         }
         if (phase_ != Phase::FinalHeader && supported_header(header_) && little16(header_.data() + 4U) >= 2U) {
             const auto length = little16(header_.data() + 100U);
             if (length != 0U) {
                 if (length < 6U || length > candidate->bytes || candidate->bytes - length < SavedRecordHeaderBytes) {
-                    unsupported_ = true; next_candidate();
+                    unsupported_ = true; reject_candidate();
                 } else { phase_ = Phase::CandidatePrefix; offset_ = 0U; }
                 continue;
             }

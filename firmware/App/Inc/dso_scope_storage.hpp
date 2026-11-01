@@ -65,11 +65,10 @@ private:
     enum class Phase : std::uint8_t { Scan, CandidateHeader, CandidatePrefix, CandidateSamples, CandidateCalibration, FinalHeader };
     static bool produce(void* context, std::uint16_t offset, std::uint8_t* output, std::uint16_t count) noexcept;
     void fail(ScopeStorageError error) noexcept;
-    void next_candidate() noexcept;
+    void reject_candidate() noexcept;
     void candidate_valid() noexcept;
     void samples_valid() noexcept;
     void inspect_header(const StorageRecord& candidate) noexcept;
-    void finish_candidates() noexcept;
     SnapshotStorage& journal_;
     const std::uint64_t board_identity_;
     SavedRecord record_{};
@@ -81,8 +80,6 @@ private:
     ScopeStorageResult result_{ScopeStorageResult::None};
     ScopeStorageError error_{ScopeStorageError::None};
     Phase phase_{Phase::Scan};
-    std::uint8_t candidate_bank_{};
-    std::uint8_t chosen_bank_{StorageBankCount};
     bool writable_{};
     bool unsupported_{};
     bool published_{};

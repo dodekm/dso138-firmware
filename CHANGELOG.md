@@ -6,8 +6,10 @@
 - Replace copy-on-write saving with a single bank. Power loss during erase/programming can lose the previous saved waveform, settings and calibration; checksums and commit validation still reject incomplete records.
 - Stage the complete payload in bounded RAM before erasing, preserving existing waveform data when saving only settings or calibration.
 - Simplify storage to one record with no mutable bank address/selector, and avoid clearing staged bytes that are completely overwritten before use.
+- Remove remaining multi-candidate bookkeeping from semantic storage opening while retaining final-header validation and malformed/unknown-format handling.
 - Track slow-filter clipping with a fixed-width shift register instead of cursor-dependent 64-bit masks, preserving the exact 63-sample history while reducing code size.
 - Pair symmetric FIR samples and derive a compact coefficient table at compile time, preserving exact results with 32 multiplies per stage output instead of 63.
+- Use a bounded exact Q32 square root for validated ADC moments, including fractional calibration offsets, with 32-bit root/remainder arithmetic.
 - Share LCD coordinate encoding, compact UI label selection and remove redundant scratch clearing.
 - The old lower storage bank becomes application space; existing saved records are not guaranteed to migrate. No new hardware deployment is claimed.
 
