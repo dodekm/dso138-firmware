@@ -8,6 +8,7 @@ namespace dso {
 inline constexpr std::uint16_t StoragePageBytes{1024U};
 inline constexpr std::uint8_t StoragePagesPerBank{2U};
 inline constexpr std::uint8_t StorageBankCount{1U};
+static_assert(StorageBankCount == 1U, "SnapshotStorage scalar state requires exactly one bank");
 inline constexpr std::uint16_t StorageBankBytes{2048U};
 inline constexpr std::uint16_t StorageRegionBytes{StorageBankCount * StorageBankBytes};
 inline constexpr std::uint16_t StorageHeaderBytes{32U};
@@ -94,8 +95,10 @@ private:
     [[nodiscard]] bool program_word(std::uint32_t offset, std::uint16_t value) noexcept;
     StoragePort port_;
     StorageSource source_{};
-    std::array<StorageRecord, StorageBankCount> records_{};
-    std::array<std::uint8_t, StoragePayloadMaximum> staged_payload_{};
+    StorageRecord record_{};
+    // Only bytes_ bytes are consumed; every byte is written during staging
+    // before erase or payload programming can begin.
+    std::array<std::uint8_t, StoragePayloadMaximum> staged_payload_;
     std::array<std::uint8_t, StorageHeaderBytes> header_{};
     std::uint32_t crc_{0xffffffffU};
     std::uint32_t generation_{};
@@ -105,8 +108,6 @@ private:
     StorageResult result_{StorageResult::None};
     StorageError error_{StorageError::None};
     Phase phase_{Phase::ScanHeader};
-    std::uint8_t bank_{};
-    std::uint8_t selected_{StorageBankCount};
     std::uint8_t page_{};
     std::uint8_t damaged_{};
     std::uint8_t unsupported_{};

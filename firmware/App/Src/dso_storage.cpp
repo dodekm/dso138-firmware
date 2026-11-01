@@ -26,7 +26,6 @@ void put16(std::uint8_t* output, std::uint16_t value) noexcept
 void put32(std::uint8_t* output, std::uint32_t value) noexcept
 { for (unsigned i{}; i < 4U; ++i) { output[i] = static_cast<std::uint8_t>(value >> (8U * i)); } }
 bool busy(StorageState state) noexcept { return state == StorageState::Scanning || state == StorageState::Saving; }
-std::uint32_t base(std::uint8_t bank) noexcept { return std::uint32_t{bank} * StorageBankBytes; }
 bool same(const StorageRecord& a, const StorageRecord& b) noexcept
 { return a.valid && b.valid && a.bank == b.bank && a.bytes == b.bytes && a.crc == b.crc && a.generation == b.generation; }
 }
@@ -43,7 +42,7 @@ bool SnapshotStorage::begin_scan() noexcept
 {
     if (busy(state_)) { return false; }
     if (!port_valid(false)) { fail(StorageError::InvalidPort); return false; }
-    records_ = {}; selected_ = StorageBankCount; bank_ = 0U; offset_ = 0U; damaged_ = 0U; unsupported_ = 0U;
+    record_ = {}; offset_ = 0U; damaged_ = 0U; unsupported_ = 0U;
     result_ = StorageResult::None; error_ = StorageError::None; mounted_ = false;
     state_ = StorageState::Scanning; phase_ = Phase::ScanHeader;
     return true;
@@ -55,29 +54,27 @@ bool SnapshotStorage::begin_save(StorageSource source, std::uint16_t bytes) noex
     if (!mounted_) { error_ = StorageError::NotMounted; return false; }
     if (unsupported_ != 0U) { error_ = StorageError::UnsupportedFormat; return false; }
     if (source.read == nullptr || bytes == 0U || bytes > StoragePayloadMaximum) { error_ = StorageError::InvalidRequest; return false; }
-    std::uint32_t latest{};
-    for (const auto& record : records_) { if (record.valid && record.generation > latest) { latest = record.generation; } }
+    const auto latest = record_.valid ? record_.generation : 0U;
     if (latest == UINT32_MAX) { error_ = StorageError::GenerationExhausted; return false; }
     generation_ = latest + 1U;
-    bank_ = 0U;
     source_ = source; bytes_ = bytes; page_ = 0U; offset_ = 0U; crc_ = 0xffffffffU;
     phase_ = Phase::StagePayload; state_ = StorageState::Saving; result_ = StorageResult::None; error_ = StorageError::None;
     return true;
 }
 
 const StorageRecord* SnapshotStorage::candidate(std::uint8_t bank) const noexcept
-{ return mounted_ && bank < StorageBankCount && records_[bank].valid ? &records_[bank] : nullptr; }
-const StorageRecord* SnapshotStorage::selected() const noexcept { return candidate(selected_); }
+{ return mounted_ && bank == 0U && record_.valid ? &record_ : nullptr; }
+const StorageRecord* SnapshotStorage::selected() const noexcept { return candidate(0U); }
 bool SnapshotStorage::select(const StorageRecord& record) noexcept
 {
-    if (!mounted_ || busy(state_) || record.bank >= StorageBankCount || !same(record, records_[record.bank])) { return false; }
-    selected_ = record.bank; return true;
+    if (!mounted_ || busy(state_) || record.bank >= StorageBankCount || !same(record, record_)) { return false; }
+    return true;
 }
 bool SnapshotStorage::read(const StorageRecord& record, std::uint16_t offset, std::uint8_t* output, std::uint16_t bytes) const noexcept
 {
-    if (!mounted_ || record.bank >= StorageBankCount || !same(record, records_[record.bank]) || offset > record.bytes ||
+    if (!mounted_ || record.bank >= StorageBankCount || !same(record, record_) || offset > record.bytes ||
         bytes > record.bytes - offset || (bytes != 0U && output == nullptr)) { return false; }
-    return bytes == 0U || port_.read(port_.context, base(record.bank) + StorageHeaderBytes + offset, output, bytes);
+    return bytes == 0U || port_.read(port_.context, StorageHeaderBytes + offset, output, bytes);
 }
 bool SnapshotStorage::read_word(std::uint32_t offset, std::uint8_t (&word)[2]) noexcept
 {
@@ -97,14 +94,13 @@ bool SnapshotStorage::program_word(std::uint32_t offset, std::uint16_t value) no
 }
 void SnapshotStorage::next_scan_bank(bool valid, bool blank) noexcept
 {
-    records_[bank_].valid = valid;
+    record_.valid = valid;
     if (!valid) {
-        records_[bank_] = {};
-        if (!blank && (unsupported_ & (1U << bank_)) == 0U) { damaged_ = static_cast<std::uint8_t>(damaged_ | (1U << bank_)); }
+        record_ = {};
+        if (!blank && unsupported_ == 0U) { damaged_ = 1U; }
     }
-    selected_ = records_[0].valid ? 0U : StorageBankCount;
     mounted_ = true; state_ = StorageState::Complete;
-    result_ = selected_ < StorageBankCount ? StorageResult::Ready : (damaged_ | unsupported_) != 0U ? StorageResult::NoValidRecord : StorageResult::Empty;
+    result_ = record_.valid ? StorageResult::Ready : ((damaged_ != 0U || unsupported_ != 0U) ? StorageResult::NoValidRecord : StorageResult::Empty);
     error_ = unsupported_ != 0U ? StorageError::UnsupportedFormat : StorageError::None;
 }
 void SnapshotStorage::inspect_header() noexcept
@@ -115,7 +111,7 @@ void SnapshotStorage::inspect_header() noexcept
     const auto committed = u16(header_.data() + 30U) == StorageCommit;
     if (committed && (u32(header_.data()) != StorageMagic || u16(header_.data() + 4U) != StorageSchema ||
                       u16(header_.data() + 6U) != StorageHeaderBytes)) {
-        unsupported_ = static_cast<std::uint8_t>(unsupported_ | (1U << bank_));
+        unsupported_ = 1U;
         next_scan_bank(false); return;
     }
     bool padding = true;
@@ -126,7 +122,7 @@ void SnapshotStorage::inspect_header() noexcept
         u32(header_.data() + 20U) != crc_bytes(header_.data(), 20U)) {
         next_scan_bank(false); return;
     }
-    records_[bank_] = {generation, u32(header_.data() + 16U), static_cast<std::uint16_t>(length), bank_, false};
+    record_ = {generation, u32(header_.data() + 16U), static_cast<std::uint16_t>(length), 0U, false};
     crc_ = 0xffffffffU; offset_ = 0U; phase_ = Phase::ScanPayload;
 }
 void SnapshotStorage::make_header() noexcept
@@ -136,7 +132,7 @@ void SnapshotStorage::make_header() noexcept
     put16(header_.data() + 6U, StorageHeaderBytes); put32(header_.data() + 8U, generation_);
     put32(header_.data() + 12U, bytes_); put32(header_.data() + 16U, crc_ ^ 0xffffffffU);
     put32(header_.data() + 20U, crc_bytes(header_.data(), 20U));
-    records_[bank_] = {generation_, crc_ ^ 0xffffffffU, bytes_, bank_, false};
+    record_ = {generation_, crc_ ^ 0xffffffffU, bytes_, 0U, false};
 }
 
 StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
@@ -144,16 +140,15 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
     StorageStep progress{state_, 0U, false};
     while (progress.words < word_budget && busy(state_)) {
         ++progress.words;
-        const auto bank_base = base(bank_);
         std::uint8_t word[2]{};
         switch (phase_) {
         case Phase::ScanHeader:
-            if (!read_word(bank_base + offset_, word)) { break; }
+            if (!read_word(offset_, word)) { break; }
             header_[offset_] = word[0]; header_[offset_ + 1U] = word[1]; offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == StorageHeaderBytes) { inspect_header(); }
             break;
         case Phase::ScanBlank:
-            if (!read_word(bank_base + offset_, word)) { break; }
+            if (!read_word(offset_, word)) { break; }
             if (u16(word) != 0xffffU) { next_scan_bank(false); break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == StorageBankBytes) { next_scan_bank(false, true); }
@@ -161,22 +156,22 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
         case Phase::ScanPayload:
         case Phase::VerifyPayload:
         case Phase::VerifyCommitPayload: {
-            if (!read_word(bank_base + StorageHeaderBytes + offset_, word)) { break; }
-            const auto count = static_cast<std::uint16_t>(std::uint32_t{records_[bank_].bytes} - offset_ < 2U ? 1U : 2U);
+            if (!read_word(StorageHeaderBytes + offset_, word)) { break; }
+            const auto count = static_cast<std::uint16_t>(std::uint32_t{record_.bytes} - offset_ < 2U ? 1U : 2U);
             if (count == 1U && word[1] != 0xffU) {
                 if (phase_ == Phase::ScanPayload) { next_scan_bank(false); } else { fail(StorageError::VerificationFailure); }
                 break;
             }
             for (std::uint16_t i{}; i < count; ++i) { crc_ = crc_byte(crc_, word[i]); }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
-            if (offset_ == records_[bank_].bytes) {
-                const auto valid = (crc_ ^ 0xffffffffU) == records_[bank_].crc;
+            if (offset_ == record_.bytes) {
+                const auto valid = (crc_ ^ 0xffffffffU) == record_.crc;
                 if (phase_ == Phase::ScanPayload) { next_scan_bank(valid); }
                 else if (!valid) { fail(StorageError::VerificationFailure); }
                 else if (phase_ == Phase::VerifyPayload) { phase_ = Phase::Commit; }
                 else {
-                    records_[bank_].valid = true; selected_ = bank_; mounted_ = true;
-                    damaged_ = static_cast<std::uint8_t>(damaged_ & static_cast<std::uint8_t>(~(1U << bank_)));
+                    record_.valid = true; mounted_ = true;
+                    damaged_ = 0U;
                     state_ = StorageState::Complete; result_ = StorageResult::Saved; error_ = StorageError::None;
                 }
             }
@@ -190,17 +185,17 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
             if (offset_ == bytes_) {
-                records_ = {}; selected_ = StorageBankCount; mounted_ = false;
+                record_ = {}; mounted_ = false;
                 page_ = 0U; offset_ = 0U; phase_ = Phase::Erase;
             }
             break;
         }
         case Phase::Erase:
-            if (!port_.erase_page(port_.context, static_cast<std::uint8_t>(bank_ * StoragePagesPerBank + page_))) { fail(StorageError::EraseFailure); }
+            if (!port_.erase_page(port_.context, page_)) { fail(StorageError::EraseFailure); }
             else { phase_ = Phase::VerifyErase; offset_ = static_cast<std::uint16_t>(page_ * StoragePageBytes); }
             progress.erased = true; progress.state = state_; return progress;
         case Phase::VerifyErase:
-            if (!read_word(bank_base + offset_, word)) { break; }
+            if (!read_word(offset_, word)) { break; }
             if (u16(word) != 0xffffU) { fail(StorageError::VerificationFailure); break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == (std::uint16_t{page_} + 1U) * StoragePageBytes) {
@@ -213,20 +208,20 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             const auto count = static_cast<std::uint16_t>(std::uint32_t{bytes_} - offset_ < 2U ? 1U : 2U);
             word[0] = staged_payload_[offset_];
             word[1] = count == 2U ? staged_payload_[offset_ + 1U] : 0xffU;
-            if (!program_word(bank_base + StorageHeaderBytes + offset_, u16(word))) { break; }
+            if (!program_word(StorageHeaderBytes + offset_, u16(word))) { break; }
             for (std::uint16_t i{}; i < count; ++i) { crc_ = crc_byte(crc_, word[i]); }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
             if (offset_ == bytes_) { make_header(); phase_ = Phase::WriteHeader; offset_ = 0U; }
             break;
         }
         case Phase::WriteHeader:
-            if (!program_word(bank_base + offset_, u16(header_.data() + offset_))) { break; }
+            if (!program_word(offset_, u16(header_.data() + offset_))) { break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == 30U) { phase_ = Phase::VerifyHeader; offset_ = 0U; }
             break;
         case Phase::VerifyHeader:
         case Phase::VerifyCommitHeader:
-            if (!read_word(bank_base + offset_, word)) { break; }
+            if (!read_word(offset_, word)) { break; }
             if (word[0] != header_[offset_] || word[1] != header_[offset_ + 1U]) { fail(StorageError::VerificationFailure); break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == StorageHeaderBytes) {
@@ -235,7 +230,7 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             }
             break;
         case Phase::Commit:
-            if (!program_word(bank_base + 30U, StorageCommit)) { break; }
+            if (!program_word(30U, StorageCommit)) { break; }
             put16(header_.data() + 30U, StorageCommit); phase_ = Phase::VerifyCommitHeader; offset_ = 0U;
             break;
         }
