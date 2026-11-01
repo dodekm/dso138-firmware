@@ -104,3 +104,5 @@ The aggregate configured image with scratch clearing removed, compact label sele
 ## Further compiler configuration comparisons
 
 Independent builds on the scratch-and-label source (61,224-byte span) produced: `-fno-ipa-sra` 61,288 bytes; `-fno-partial-inlining` 61,256; `-fno-ipa-cp-clone` 61,224; and `-flto-partition=none` 61,232. Static RAM was unchanged. None was adopted. These results precede the display encoding change; they do not prove the behavior of combinations or different source revisions. GCC reports that IPA cloning is disabled at `-Os`, so explicitly enabling it warrants a separate experiment.
+
+Explicitly enabling IPA cloning on the aggregate source produced the same 61,176-byte load span and unchanged static RAM. No compiler flag from this additional batch was adopted.
