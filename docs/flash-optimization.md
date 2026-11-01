@@ -106,3 +106,9 @@ The aggregate configured image with scratch clearing removed, compact label sele
 Independent builds on the scratch-and-label source (61,224-byte span) produced: `-fno-ipa-sra` 61,288 bytes; `-fno-partial-inlining` 61,256; `-fno-ipa-cp-clone` 61,224; and `-flto-partition=none` 61,232. Static RAM was unchanged. None was adopted. These results precede the display encoding change; they do not prove the behavior of combinations or different source revisions. GCC reports that IPA cloning is disabled at `-Os`, so explicitly enabling it warrants a separate experiment.
 
 Explicitly enabling IPA cloning on the aggregate source produced the same 61,176-byte load span and unchanged static RAM. No compiler flag from this additional batch was adopted.
+
+## Larger candidates investigated
+
+Selected-sample reads repeatedly call the 588-byte full saved-record validator, despite open-time semantic validation. A private candidate reused the existing journal decoder after checking publication lifetime and retained sample bounds, transport failure handling and final publication CRC. The sample-reading function shrank from 186 to 108 bytes, and storage corruption/power-loss/index/output-preservation suites passed. However, the validator remains necessary during open, and the total image grew by 16 bytes to 61,192. It was not adopted for this footprint objective; its possible runtime benefit is distinct from Flash savings.
+
+The division library already uses Cortex-M3 CLZ/UDIV and limb quotient corrections; replacing it with a compact bitwise loop would risk slower worst-case arithmetic. No replacement was adopted. Selective installed-tool searches found only the GNU Arm 14.3.1 target compiler; alternative toolchain evaluation is still outstanding. A preliminary dictionary-packing experiment on UI strings estimated about 230 bytes of gross saving before decoder/table costs; that is an experiment-specific estimate, not an upper bound on possible compression.
