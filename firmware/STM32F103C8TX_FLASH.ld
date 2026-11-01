@@ -11,13 +11,13 @@ _estack = ORIGIN(RAM) + LENGTH(RAM);
 
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 60K
+  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 62K
   RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 20K
 }
 
 __dso_application_flash_start = ORIGIN(FLASH);
 __dso_application_flash_end = ORIGIN(FLASH) + LENGTH(FLASH);
-__dso_storage_start = 0x0800F000;
+__dso_storage_start = 0x0800F800;
 __dso_storage_end = 0x08010000;
 __dso_storage_page_bytes = 1024;
 __dso_storage_bank_bytes = 2048;
@@ -28,8 +28,8 @@ ASSERT((__dso_storage_start % __dso_storage_page_bytes) == 0,
        "storage start must be page aligned")
 ASSERT((__dso_storage_end % __dso_storage_page_bytes) == 0,
        "storage end must be page aligned")
-ASSERT(__dso_storage_end == (__dso_storage_start + 2 * __dso_storage_bank_bytes),
-       "storage must span two flash banks")
+ASSERT(__dso_storage_end == (__dso_storage_start + __dso_storage_bank_bytes),
+       "storage must span one flash bank")
 ASSERT(__dso_storage_end == 0x08010000,
        "storage end must match the device flash boundary")
 

@@ -112,3 +112,57 @@ Explicitly enabling IPA cloning on the aggregate source produced the same 61,176
 Selected-sample reads repeatedly call the 588-byte full saved-record validator, despite open-time semantic validation. A private candidate reused the existing journal decoder after checking publication lifetime and retained sample bounds, transport failure handling and final publication CRC. The sample-reading function shrank from 186 to 108 bytes, and storage corruption/power-loss/index/output-preservation suites passed. However, the validator remains necessary during open, and the total image grew by 16 bytes to 61,192. It was not adopted for this footprint objective; its possible runtime benefit is distinct from Flash savings.
 
 The division library already uses Cortex-M3 CLZ/UDIV and limb quotient corrections; replacing it with a compact bitwise loop would risk slower worst-case arithmetic. No replacement was adopted. Selective installed-tool searches found only the GNU Arm 14.3.1 target compiler; alternative toolchain evaluation is still outstanding. A preliminary dictionary-packing experiment on UI strings estimated about 230 bytes of gross saving before decoder/table costs; that is an experiment-specific estimate, not an upper bound on possible compression.
+
+## Source attribution and startup review
+
+A private analysis build added debug information while retaining Release optimization. Its objcopy load image is byte-for-byte identical to the accepted 61,176-byte image (SHA-256 `d11c70734ce316ecc215c1296c6d8f34573803a89650791faab6bd780056faaa`). DWARF line attribution within the 9,136-byte idle routine assigned instruction bytes to the following source files. This describes compiler line attribution, not independent or additive module costs; inlining and unattributed instructions limit its interpretation.
+
+| Source file | Attributed instruction bytes within idle |
+| --- | ---: |
+| dso_ui_controller.cpp | 1,770 |
+| dso_measurements.cpp | 1,680 |
+| dso_rolling.cpp | 1,092 |
+| dso_calibration.cpp | 896 |
+| dso_scope_screen.cpp | 772 |
+| dso_scaling.cpp | 568 |
+| dso_panel_sampler.cpp | 472 |
+
+Inspection found distinct bounded processing and state paths, rather than a duplicated full acquisition pipeline. State reads on either side of service calls observe different points in time; merging them would require a separate concurrency argument.
+
+The global initializer occupies 1,740 bytes with a 224-byte frame. Its 20 memset calls clear 7,408 bytes across member initialization, with a separate 72-byte memcpy. These are runtime bytes written, not Flash bytes consumed. Many initialize distinct buffers and state. Removing them merely because storage begins in BSS would change normal object-construction semantics unless additional lifetime rules or special constructor paths were introduced. No such change was adopted, and no substantial whole-image saving was demonstrated by that review.
+
+## Feature attribution before the single-bank revision
+
+The same debug analysis classified unique instruction addresses throughout `.text` by their active DWARF source file. The following are source-area costs, not independent feature removal savings. In particular, controller code also orchestrates storage, calibration and acquisition workflows; shared/inlined code cannot be cleanly charged to just one user feature.
+
+| Source area | Attributed instruction bytes |
+| --- | ---: |
+| UI/controller | 11,068 |
+| Display, rendering and STM32 LCD | 10,262 |
+| Acquisition, triggering, rolling, filtering, scaling and timebase | 9,978 |
+| Storage, saving and recall | 7,648 |
+| Platform, HAL and initialization | 7,228 |
+| Calibration | 2,838 |
+| Measurements | 2,144 |
+| Shared runtime | 872 |
+| Physical controls | 634 |
+
+The attributed subtotal is 52,672 bytes. Another 1,488 instruction bytes lack source-file attribution, and `.text` contains 3,400 bytes of literal pools/gaps. These total the 57,560-byte text section. Constant data, vectors and other load sections are counted separately in the full load-span measurement. This ranking predates the storage geometry/staging change.
+
+## Alternative compiler: GNU Arm 13.3.rel1
+
+An official Windows bare-metal Arm GNU 13.3.rel1 package was evaluated separately from the installed STM32 GNU 14.3 toolchain. Its archive matched the download response's Content-MD5; this is transport-integrity evidence, not an independently signed checksum. An initially long installation path caused standard-header lookup failures. Invoking the same extracted compiler through a short private path resolved the probe and permitted a full rebuild without custom standard-library include paths.
+
+Only the unsupported diagnostic-sidecar option `-fcyclomatic-complexity` was removed; source, target/ABI and optimization settings were retained. The linker mapped an image ending at 0x0800F0B8 (61,624 bytes): 448 bytes larger than the accepted pre-single-bank source, and 184 bytes beyond its 60 KiB application limit. The link was correctly rejected. GNU 13.3 was not adopted. Release information is available from [Arm's official downloads](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads).
+
+## User-authorized trade-off: one storage bank
+
+The user explicitly accepted loss of previous-record protection during saving. The application region is now 62 KiB (63,488 bytes), and only the final 2 KiB at 0x0800F800 is reserved for storage. The old lower bank becomes application space; migration of the latest record from the former layout is not guaranteed. Full 1,024-sample waveform records, settings and calibration remain supported. CRC/readback/commit checks remain, so interrupted records are rejected even though an older record may no longer survive.
+
+Settings and calibration saves may source an existing waveform from the same bank. Therefore the complete outgoing payload is first staged in a fixed 2,016-byte RAM buffer, with at most one two-byte source read per budgeted staging operation. Only successful completion invalidates the previous descriptor and begins erase. No allocation or full-record stack buffer is used. The linker and STM32 adapter both enforce the new storage range. The application-object SRAM budget assertion increases from 14 to 16 KiB to account for the explicit staging allocation; the 2 KiB stack reservation is retained.
+
+The configured GCC 14.3 Release image ends at 0x0800EEA8 and occupies 61,096 bytes: 80 fewer bytes than the preceding accepted source. Together with the additional 2,048 bytes of application space, headroom increases from 264 to 2,392 bytes. Relative to the initial 160-byte headroom, the net increase is 2,232 bytes. Initialized RAM remains 112 bytes; BSS grows to 16,212 bytes. With 2,052 bytes of stack reservation/alignment, 2,104 bytes remain unallocated. The target storage object is 2,108 bytes; host ABI size differs. The largest individual compiler-reported frame remains 384 bytes; this alone is not a full call-chain stack proof.
+
+A private native oracle exercised all 949 erase/program mutation boundaries in three interruption modes (2,847 injected interruptions), accepting only an intact old record, intact new record or no valid record. It checked CRCs, 1,024-sample and calibration preservation, same-bank source aliasing, source-read failure before erase, read-fault retry, representative post-failure resaves, and operation/address bounds. A fresh controller UI test also passed against the new production sources. These are software simulations; this revision has not been flashed or physically tested.
+
+Fresh storage-UI and calibration-persistence-UI suites passed against the target candidate source set. Only the private test expectation for rejection of a malformed sole record changed: it now expects no valid record instead of falling back to a previous bank. Boot HOLD, reboot/recall, frozen provenance, partial-read isolation, independent calibration persistence and waveform/settings preservation remained checked. All seven changed target firmware files were hash-compared against the canonical source after building. Test sources and temporary artifacts remain outside the release repository.

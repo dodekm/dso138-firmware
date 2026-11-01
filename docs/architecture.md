@@ -32,7 +32,9 @@ The LED indicates accepted software trigger events, not an electrical trigger st
 
 ## Memory and storage
 
-The linker layout provides 60 KiB for the application and reserves the final 4 KiB of Flash for the persistent journal. The target has 20 KiB SRAM; the linker reserves a 2 KiB stack region. The storage layer and board-specific Flash adapter are in `dso_storage.cpp` and `dso_stm32_storage.cpp`.
+The unreleased linker layout provides 62 KiB for the application and reserves the final 2 KiB of Flash (0x0800F800–0x0800FFFF) for one storage bank. The target has 20 KiB SRAM; the linker reserves a 2 KiB stack region. The storage layer and board-specific Flash adapter are in `dso_storage.cpp` and `dso_stm32_storage.cpp`.
+
+Before erasing the only bank, the storage service stages the complete outgoing payload in owned RAM using bounded work steps. This permits settings/calibration saves to preserve a waveform sourced from that same bank. Once erase begins, power loss may destroy the previous saved data. CRC, readback and final commit validation still prevent incomplete records from being accepted. This intentionally replaces the previous two-bank power-loss protection. The previous lower bank becomes application space; only the previous upper bank remains at a storage address, so migration of the latest old record is not guaranteed.
 
 ## Status and limits
 

@@ -22,4 +22,6 @@ D3 is an activity cue for accepted trigger crossings. It stays off when there is
 
 ## Unexpected readings or saved records
 
-Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 4 KiB of Flash stores the persistent journal; back up the full device before recovery and avoid full-chip erase if you want to keep settings or waveforms.
+Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 2 KiB of Flash stores the persistent journal; back up the full device before recovery and avoid full-chip erase if you want to keep settings or waveforms.
+
+The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.

@@ -17,7 +17,7 @@ The `.ioc` file is maintained as the hardware design reference, not the ordinary
 
 A successful compile does not establish suitability for every DSO138 or calibrate its analog front end. Confirm the board/display and UID configuration. Before programming, use STM32CubeProgrammer over SWD to save a full 64 KiB Flash backup and note the option-byte settings. See [Getting started](getting-started.md#4-build-back-up-and-program).
 
-Program the ELF with CubeProgrammer and compare by readback. Avoid routine full-chip erase; the final 4 KiB contains the persistent journal. Each MCU requires its own source configuration and build. The public UID-unconfigured source has not been newly flashed as a public image on hardware.
+Program the ELF with CubeProgrammer and compare by readback. Avoid routine full-chip erase; the final 2 KiB contains the persistent journal. Each MCU requires its own source configuration and build. The public UID-unconfigured source has not been newly flashed as a public image on hardware.
 
 ## Publication checks
 
@@ -27,12 +27,16 @@ Private software checks passed 46 LED/GPIO/Capture cases, the rolling acquisitio
 
 ## Size optimization and future headroom
 
+The unreleased single-bank revision has a configured Release load span of 61,096 bytes within a 63,488-byte application region, leaving 2,392 bytes. The final 2,048 bytes are reserved for storage. RAM comprises 112 bytes of initialized data, 16,212 bytes of BSS and 2,052 bytes of stack reservation/alignment, leaving 2,104 bytes of the 20 KiB SRAM unallocated. These are configured-build software measurements, not hardware qualification. Persistent payload staging uses 2,016 bytes of owned RAM; no heap allocation was introduced.
+
 Both configurations retain `-Os`, LTO with one partition, section garbage collection and the existing non-LTO Capture translation unit. They now enable `-fipa-pta` for more precise interprocedural pointer analysis; startup and terminal application fault handlers have cold-path hints. No ABI or floating-point semantics were changed.
 
 Controlled comparisons found no saving from `-Oz`, while `-O2` and the tested global no-inline settings were larger. On the same pending-event implementation before the cold-path hints, `-fipa-pta` reduced the load image from 61,520 to 61,304 bytes. The hints then reduced it to 61,280 bytes. A lossless packed-font prototype saved table bytes but increased total code size and was discarded. These are build-size observations, not speed measurements.
 
-Only 160 bytes remain in the representative application image. Future revisions should aim to recover at least 1 KiB of application headroom through measured, behavior-preserving changes before adding substantial features. The linker continues to enforce the 60 KiB application boundary and the separate 4 KiB journal; neither the journal nor the 2 KiB stack reservation may be reduced to make an image fit.
+The 1.0.1 figures above are historical. The unreleased revision intentionally reduces persistent storage to one 2 KiB bank and expands application Flash to 62 KiB. Saving no longer preserves an earlier committed bank through power loss. Payload staging consumes additional bounded SRAM; the 2 KiB stack reservation is retained. See the changelog and Flash optimization report for current measurements.
 
 GNU make may report missing LTO `.su`/`.cyclo` sidecar targets; a linker warning about an executable writable SRAM load segment reflects the retained Flash-programming kernel. The application compiler treats source warnings as errors. For command-line builds, use the headless builder's `-no-indexer` option to avoid unrelated CDT indexer diagnostics.
 
 The PDF manual illustrates the reference firmware interface. Use this repository's getting-started guide for the public source's per-board configuration and programming procedure.
+
+The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.

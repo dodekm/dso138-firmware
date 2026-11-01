@@ -45,7 +45,9 @@ std::uint32_t dso_storage_busy_kernel(std::uintptr_t address, std::uint32_t valu
 
 namespace dso {
 namespace {
-constexpr std::uintptr_t RegionBegin{0x0800f000U};
+constexpr std::uintptr_t RegionBegin{0x0800f800U};
+static_assert(RegionBegin + StorageRegionBytes == 0x08010000U,
+              "Storage must occupy only the final 2 KiB of Flash");
 constexpr std::uintptr_t RamBegin{0x20000000U}, RamEnd{0x20005000U};
 constexpr std::uint32_t HsiReady{RCC_CR_HSION | RCC_CR_HSIRDY};
 constexpr std::uint32_t OwnedFlags{FLASH_SR_EOP | FLASH_SR_PGERR | FLASH_SR_WRPRTERR};

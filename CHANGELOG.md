@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Flash headroom and single-bank storage
+
+- Reserve 2 KiB instead of 4 KiB for saved records, increasing the application region to 62 KiB.
+- Replace copy-on-write saving with a single bank. Power loss during erase/programming can lose the previous saved waveform, settings and calibration; checksums and commit validation still reject incomplete records.
+- Stage the complete payload in bounded RAM before erasing, preserving existing waveform data when saving only settings or calibration.
+- Share LCD coordinate encoding, compact UI label selection and remove redundant scratch clearing.
+- The old lower storage bank becomes application space; existing saved records are not guaranteed to migrate. No new hardware deployment is claimed.
+
 ## 1.0.1 — Trigger LED indication
 
 - Add a foreground, nonblocking D3 pulse for newly accepted trigger crossings.

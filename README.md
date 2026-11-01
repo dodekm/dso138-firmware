@@ -21,6 +21,8 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 | Measurements | Frequency, peak-to-peak, mean and RMS when valid for the capture |
 | Records | Save and recall waveforms and settings; independent calibration store |
 
+The unreleased revision uses one 2 KiB storage bank, leaving 62 KiB for application code. Reset or power loss during a save can lose the saved waveform, settings and calibration. Wait for completion before removing power. Records from the previous two-bank layout are not guaranteed to migrate; its lower bank becomes application space.
+
 ## Quick start
 
 1. Read [Getting started](docs/getting-started.md): identify the board, set its MCU UID and identity, and make a complete Flash backup.

@@ -125,7 +125,7 @@ bool route_qualification_action(void* context, dso::QualificationAction action) 
 static_assert(sizeof(dso::DmaAcquisition) < 6U * 1024U, "Revisit 20KiB SRAM budget");
 static_assert(sizeof(acquisition) + sizeof(panel_sampler) + sizeof(front_panel) + sizeof(panel_suspension) +
     sizeof(display) + sizeof(screen) + sizeof(scope_controller) + sizeof(calibration_bank) + sizeof(rolling) +
-    sizeof(snapshot_storage) + sizeof(scope_storage) < 14U * 1024U,
+    sizeof(snapshot_storage) + sizeof(scope_storage) < 16U * 1024U,
     "Leave SRAM for HAL state, the reserved stack and interrupt headroom");
 }
 

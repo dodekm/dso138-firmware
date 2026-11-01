@@ -80,7 +80,7 @@ bool ScopeStorage::begin_open() noexcept
     if (state_ == ScopeStorageState::Disabled) { error_ = ScopeStorageError::Disabled; return false; }
     if (state_ == ScopeStorageState::Opening || state_ == ScopeStorageState::Saving) { return false; }
     published_ = false; unsupported_ = false; result_ = ScopeStorageResult::None;
-    error_ = ScopeStorageError::None; samples_ = {}; calibration_ = {}; candidate_bank_ = 0U; chosen_bank_ = 2U;
+    error_ = ScopeStorageError::None; samples_ = {}; calibration_ = {}; candidate_bank_ = 0U; chosen_bank_ = StorageBankCount;
     if (!journal_.begin_scan()) { fail(ScopeStorageError::Journal); return false; }
     phase_ = Phase::Scan; state_ = ScopeStorageState::Opening; return true;
 }
@@ -151,8 +151,7 @@ bool ScopeStorage::produce(void* context, std::uint16_t offset, std::uint8_t* ou
 void ScopeStorage::candidate_valid() noexcept
 {
     const auto* candidate = journal_.candidate(candidate_bank_);
-    const auto* previous = journal_.candidate(chosen_bank_);
-    if (candidate != nullptr && (previous == nullptr || candidate->generation > previous->generation)) { chosen_bank_ = candidate_bank_; }
+    if (candidate != nullptr) { chosen_bank_ = candidate_bank_; }
     next_candidate();
 }
 
@@ -179,7 +178,7 @@ void ScopeStorage::inspect_header(const StorageRecord& candidate) noexcept
 
 void ScopeStorage::finish_candidates() noexcept
 {
-    if (chosen_bank_ >= 2U) {
+    if (chosen_bank_ >= StorageBankCount) {
         state_ = ScopeStorageState::Ready;
         result_ = journal_.result() == StorageResult::Empty ? ScopeStorageResult::Empty : ScopeStorageResult::NoValidRecord;
         error_ = unsupported_ ? ScopeStorageError::UnsupportedFormat : ScopeStorageError::None;
@@ -191,7 +190,7 @@ void ScopeStorage::finish_candidates() noexcept
 void ScopeStorage::next_candidate() noexcept
 {
     ++candidate_bank_; offset_ = 0U; phase_ = Phase::CandidateHeader;
-    if (candidate_bank_ >= 2U) { finish_candidates(); }
+    if (candidate_bank_ >= StorageBankCount) { finish_candidates(); }
 }
 
 bool ScopeStorage::read_selected_sample(std::uint16_t index, std::uint16_t& sample) const noexcept

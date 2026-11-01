@@ -43,7 +43,7 @@ bool SnapshotStorage::begin_scan() noexcept
 {
     if (busy(state_)) { return false; }
     if (!port_valid(false)) { fail(StorageError::InvalidPort); return false; }
-    records_ = {}; selected_ = 2U; bank_ = 0U; offset_ = 0U; damaged_ = 0U; unsupported_ = 0U;
+    records_ = {}; selected_ = StorageBankCount; bank_ = 0U; offset_ = 0U; damaged_ = 0U; unsupported_ = 0U;
     result_ = StorageResult::None; error_ = StorageError::None; mounted_ = false;
     state_ = StorageState::Scanning; phase_ = Phase::ScanHeader;
     return true;
@@ -59,24 +59,23 @@ bool SnapshotStorage::begin_save(StorageSource source, std::uint16_t bytes) noex
     for (const auto& record : records_) { if (record.valid && record.generation > latest) { latest = record.generation; } }
     if (latest == UINT32_MAX) { error_ = StorageError::GenerationExhausted; return false; }
     generation_ = latest + 1U;
-    bank_ = selected_ < 2U ? static_cast<std::uint8_t>(selected_ ^ 1U) : 0U;
-    records_[bank_] = {};
+    bank_ = 0U;
     source_ = source; bytes_ = bytes; page_ = 0U; offset_ = 0U; crc_ = 0xffffffffU;
-    phase_ = Phase::Erase; state_ = StorageState::Saving; result_ = StorageResult::None; error_ = StorageError::None;
+    phase_ = Phase::StagePayload; state_ = StorageState::Saving; result_ = StorageResult::None; error_ = StorageError::None;
     return true;
 }
 
 const StorageRecord* SnapshotStorage::candidate(std::uint8_t bank) const noexcept
-{ return mounted_ && bank < 2U && records_[bank].valid ? &records_[bank] : nullptr; }
+{ return mounted_ && bank < StorageBankCount && records_[bank].valid ? &records_[bank] : nullptr; }
 const StorageRecord* SnapshotStorage::selected() const noexcept { return candidate(selected_); }
 bool SnapshotStorage::select(const StorageRecord& record) noexcept
 {
-    if (!mounted_ || busy(state_) || record.bank >= 2U || !same(record, records_[record.bank])) { return false; }
+    if (!mounted_ || busy(state_) || record.bank >= StorageBankCount || !same(record, records_[record.bank])) { return false; }
     selected_ = record.bank; return true;
 }
 bool SnapshotStorage::read(const StorageRecord& record, std::uint16_t offset, std::uint8_t* output, std::uint16_t bytes) const noexcept
 {
-    if (!mounted_ || record.bank >= 2U || !same(record, records_[record.bank]) || offset > record.bytes ||
+    if (!mounted_ || record.bank >= StorageBankCount || !same(record, records_[record.bank]) || offset > record.bytes ||
         bytes > record.bytes - offset || (bytes != 0U && output == nullptr)) { return false; }
     return bytes == 0U || port_.read(port_.context, base(record.bank) + StorageHeaderBytes + offset, output, bytes);
 }
@@ -103,14 +102,9 @@ void SnapshotStorage::next_scan_bank(bool valid, bool blank) noexcept
         records_[bank_] = {};
         if (!blank && (unsupported_ & (1U << bank_)) == 0U) { damaged_ = static_cast<std::uint8_t>(damaged_ | (1U << bank_)); }
     }
-    if (bank_ == 0U) { bank_ = 1U; offset_ = 0U; phase_ = Phase::ScanHeader; return; }
-    if (records_[0].valid && records_[1].valid && records_[0].generation == records_[1].generation) {
-        fail(StorageError::AmbiguousGeneration); return;
-    }
-    selected_ = records_[0].valid ? 0U : records_[1].valid ? 1U : 2U;
-    if (records_[1].valid && (!records_[0].valid || records_[1].generation > records_[0].generation)) { selected_ = 1U; }
+    selected_ = records_[0].valid ? 0U : StorageBankCount;
     mounted_ = true; state_ = StorageState::Complete;
-    result_ = selected_ < 2U ? StorageResult::Ready : (damaged_ | unsupported_) != 0U ? StorageResult::NoValidRecord : StorageResult::Empty;
+    result_ = selected_ < StorageBankCount ? StorageResult::Ready : (damaged_ | unsupported_) != 0U ? StorageResult::NoValidRecord : StorageResult::Empty;
     error_ = unsupported_ != 0U ? StorageError::UnsupportedFormat : StorageError::None;
 }
 void SnapshotStorage::inspect_header() noexcept
@@ -188,6 +182,19 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             }
             break;
         }
+        case Phase::StagePayload: {
+            const auto count = static_cast<std::uint16_t>(std::uint32_t{bytes_} - offset_ < 2U ? 1U : 2U);
+            if (!source_.read(source_.context, offset_, staged_payload_.data() + offset_, count)) {
+                // No journal state or flash has been changed while staging.
+                state_ = StorageState::Fault; error_ = StorageError::SourceFailure; break;
+            }
+            offset_ = static_cast<std::uint16_t>(offset_ + count);
+            if (offset_ == bytes_) {
+                records_ = {}; selected_ = StorageBankCount; mounted_ = false;
+                page_ = 0U; offset_ = 0U; phase_ = Phase::Erase;
+            }
+            break;
+        }
         case Phase::Erase:
             if (!port_.erase_page(port_.context, static_cast<std::uint8_t>(bank_ * StoragePagesPerBank + page_))) { fail(StorageError::EraseFailure); }
             else { phase_ = Phase::VerifyErase; offset_ = static_cast<std::uint16_t>(page_ * StoragePageBytes); }
@@ -203,9 +210,9 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             }
             break;
         case Phase::WritePayload: {
-            word[0] = 0xffU; word[1] = 0xffU;
             const auto count = static_cast<std::uint16_t>(std::uint32_t{bytes_} - offset_ < 2U ? 1U : 2U);
-            if (!source_.read(source_.context, offset_, word, count)) { fail(StorageError::SourceFailure); break; }
+            word[0] = staged_payload_[offset_];
+            word[1] = count == 2U ? staged_payload_[offset_ + 1U] : 0xffU;
             if (!program_word(bank_base + StorageHeaderBytes + offset_, u16(word))) { break; }
             for (std::uint16_t i{}; i < count; ++i) { crc_ = crc_byte(crc_, word[i]); }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
@@ -236,9 +243,9 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
     progress.state = state_; return progress;
 }
 
-static_assert(sizeof(SnapshotStorage) <= 160U, "Keep the storage transaction state bounded");
+static_assert(sizeof(SnapshotStorage) <= 2200U, "Keep the staged storage workspace within the SRAM budget");
 static_assert(StorageBankBytes == std::uint32_t{StoragePageBytes} * StoragePagesPerBank &&
-              StorageRegionBytes == 2U * StorageBankBytes, "Storage partition geometry");
+              StorageRegionBytes == std::uint32_t{StorageBankCount} * StorageBankBytes, "Storage partition geometry");
 static_assert(StorageHeaderBytes == 32U && StoragePayloadMaximum + StorageHeaderBytes == StorageBankBytes &&
               StorageBankBytes % 2U == 0U, "Versioned halfword storage layout");
 } // namespace dso

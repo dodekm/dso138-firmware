@@ -17,8 +17,9 @@ struct ScopeStorageStep final { ScopeStorageState state; std::uint16_t words; bo
 
 // Foreground-only semantic layer. The journal/port must outlive this object and
 // must not be operated separately. All candidates are completely validated
-// before publication. A transport read failure aborts opening; a known-format
-// semantic failure permits fallback. Unknown formats inhibit all future writes.
+// before publication. A transport read failure aborts opening. There is one
+// bank, so a known-format semantic failure has no older record to fall back to.
+// Unknown formats inhibit all future writes.
 class ScopeStorage final {
 public:
     ScopeStorage(SnapshotStorage& journal, std::uint64_t board_identity, bool writable) noexcept;
@@ -26,9 +27,9 @@ public:
     ScopeStorage& operator=(const ScopeStorage&) = delete;
     [[nodiscard]] bool begin_open() noexcept;
     // Metadata is copied into a canonical header immediately. Sample callbacks
-    // remain borrowed and MUST be immutable until Saving ends. The old selected
-    // record stays available throughout Saving, including as the sample source
-    // of a settings-only update that preserves the existing waveform.
+    // remain borrowed and MUST be immutable until staging completes. The old
+    // selected record stays readable throughout staging, including as the
+    // sample source of settings-only updates that preserve its waveform.
     // Calibration input is a separate immutable canonical DSC1 stream, never
     // the waveform's historical profile. Preflight reads at most 204 bytes in
     // <=32-byte chunks before starting any journal mutation. A failed preflight
@@ -81,7 +82,7 @@ private:
     ScopeStorageError error_{ScopeStorageError::None};
     Phase phase_{Phase::Scan};
     std::uint8_t candidate_bank_{};
-    std::uint8_t chosen_bank_{2U};
+    std::uint8_t chosen_bank_{StorageBankCount};
     bool writable_{};
     bool unsupported_{};
     bool published_{};
