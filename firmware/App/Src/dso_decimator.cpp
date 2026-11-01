@@ -26,6 +26,24 @@ std::int16_t rounded(std::int32_t value) noexcept
     const auto result = (magnitude + SlowDecimator::CoefficientScale / 2) / SlowDecimator::CoefficientScale;
     return static_cast<std::int16_t>(value < 0 ? -result : result);
 }
+static_assert(SlowDecimator::Taps == 63U && SlowDecimator::Taps % 2U == 1U,
+              "Paired FIR requires the public odd 63-tap coefficient table");
+constexpr bool coefficients_symmetric() noexcept
+{
+    for (std::uint16_t i{}; i < 31U; ++i) {
+        if (SlowDecimator::Coefficients[i] != SlowDecimator::Coefficients[62U - i]) { return false; }
+    }
+    return SlowDecimator::Coefficients[31] % 2 == 0;
+}
+constexpr auto make_half_coefficients() noexcept
+{
+    std::array<std::int16_t, 32> result{};
+    for (std::uint16_t i{}; i < 32U; ++i) { result[i] = SlowDecimator::Coefficients[i]; }
+    result[31] = static_cast<std::int16_t>(result[31] / 2);
+    return result;
+}
+static_assert(coefficients_symmetric(), "Full FIR coefficients must be symmetric and center must be even");
+constexpr auto HalfCoefficients = make_half_coefficients();
 static_assert(coefficient_sum() == SlowDecimator::CoefficientScale, "Exact unity DC gain");
 static_assert(AbsoluteSum == 47156, "Recheck all state/accumulator bounds after coefficient changes");
 // ceil(2048*L1+.5)=2948; ceil(2948*L1+.5)=4243. Intermediate
@@ -58,11 +76,14 @@ bool SlowDecimator::Stage::push(std::int16_t sample, bool raw_clipped,
     if (remaining != 0U) { --remaining; return false; }
     remaining = 4U;
     std::int32_t sum{};
-    auto index = cursor; // Oldest sample; symmetry gives the same causal FIR.
-    for (std::uint16_t tap{}; tap < Taps; ++tap) {
-        sum += static_cast<std::int32_t>(history[index]) * Coefficients[tap];
-        index = static_cast<std::uint8_t>(index + 1U);
-        if (index == Taps) { index = 0U; }
+    auto left = cursor;
+    auto right = static_cast<std::uint8_t>(cursor == 0U ? Taps - 1U : cursor - 1U);
+    // Iteration 31 pairs the center sample with itself; its half coefficient doubles exactly.
+    for (std::uint16_t tap{}; tap < 32U; ++tap) {
+        sum += (static_cast<std::int32_t>(history[left]) + history[right]) * HalfCoefficients[tap];
+        left = static_cast<std::uint8_t>(left + 1U);
+        if (left == Taps) { left = 0U; }
+        right = static_cast<std::uint8_t>(right == 0U ? Taps - 1U : right - 1U);
     }
     output = rounded(sum);
     clipped_output = clipped != 0U;
