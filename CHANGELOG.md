@@ -12,6 +12,7 @@
 - Use a bounded exact Q32 square root for validated ADC moments, including fractional calibration offsets, with 32-bit root/remainder arithmetic.
 - Narrow the bounded fractional frequency quotient to 32 bits while preserving the original fast path, precision and rounding.
 - Specialize exact waveform-position multiplication for its bounded width and simplify adjacent-sample interpolation using proven 64-bit product bounds, retaining rounding and viewport behavior.
+- Store bounded private vertical projection coordinates in 32 bits, reducing Flash, RAM and stack use while retaining 64-bit horizontal geometry and interpolation products.
 - Share LCD coordinate encoding, compact UI label selection and remove redundant scratch clearing.
 - The old lower storage bank becomes application space; existing saved records are not guaranteed to migrate. No new hardware deployment is claimed.
 

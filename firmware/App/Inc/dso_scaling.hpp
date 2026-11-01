@@ -107,9 +107,9 @@ public:
     [[nodiscard]] ProjectionState state() const noexcept { return state_; }
 private:
     [[nodiscard]] std::int64_t sample_x(std::uint16_t index) const noexcept;
-    [[nodiscard]] std::int64_t sample_y(std::uint16_t sample) const noexcept;
-    [[nodiscard]] std::int64_t segment_y(std::int64_t column) const noexcept;
-    void merge(std::uint16_t column, std::int64_t y) noexcept;
+    [[nodiscard]] std::int32_t sample_y(std::uint16_t sample) const noexcept;
+    [[nodiscard]] std::int32_t segment_y(std::int64_t column) const noexcept;
+    void merge(std::uint16_t column, std::int32_t y) noexcept;
     const std::uint16_t* samples_{};
     WaveformProjection* output_{};
     // Minimal immutable geometry copied only after begin() validates the full
@@ -124,9 +124,9 @@ private:
     std::uint16_t count_{};
     std::uint16_t next_sample_{};
     std::int64_t previous_x_{};
-    std::int64_t previous_y_{};
+    std::int32_t previous_y_{};
     std::int64_t target_x_{};
-    std::int64_t target_y_{};
+    std::int32_t target_y_{};
     std::int32_t draw_x_{};
     std::int32_t draw_end_{};
     bool have_previous_{};

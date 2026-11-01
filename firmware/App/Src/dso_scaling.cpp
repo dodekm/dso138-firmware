@@ -206,23 +206,23 @@ std::int64_t WaveformProjector::sample_x(std::uint16_t index) const noexcept
     return sample_position_x(index,pretrigger_,divider_,timer_hz_,view_);
 }
 
-std::int64_t WaveformProjector::sample_y(std::uint16_t sample) const noexcept
+std::int32_t WaveformProjector::sample_y(std::uint16_t sample) const noexcept
 {
     // begin() validated the copied scales; step() checked this 12-bit code.
     // Their accepted bounds keep |voltage| <= 1,073,479,680 uV and |y| <
     // 25.8 million, so the public conversion's int32 range check cannot fail.
     if (calibration_.kind == CalibrationKind::Unavailable) {
-        return static_cast<std::int64_t>((std::uint32_t{4095U-sample} * (view_.height-1U) + 2047U)/4095U) +
+        return static_cast<std::int32_t>((std::uint32_t{4095U-sample} * (view_.height-1U) + 2047U)/4095U) +
             view_.vertical_offset_pixels;
     }
     const auto delta = std::int64_t{sample} * 65536 - calibration_.zero_code_q16;
     const auto voltage = detail::round_gain_product(delta * calibration_.microvolts_per_code_q16,
                                                      calibration_.gain_shift);
-    return view_.height/2U + std::int64_t{view_.vertical_offset_pixels} -
-        rounded_signed(voltage * view_.pixels_per_div,physical_microvolts_per_div_);
+    return static_cast<std::int32_t>(view_.height/2U + std::int64_t{view_.vertical_offset_pixels} -
+        rounded_signed(voltage * view_.pixels_per_div,physical_microvolts_per_div_));
 }
 
-std::int64_t WaveformProjector::segment_y(std::int64_t column) const noexcept
+std::int32_t WaveformProjector::segment_y(std::int64_t column) const noexcept
 {
     // Exact endpoints need no interpolation or rounding. The general path
     // below retains its full-width product/remainder handling for interiors.
@@ -239,15 +239,15 @@ std::int64_t WaveformProjector::segment_y(std::int64_t column) const noexcept
     auto whole = product / width;
     const auto remainder = product % width;
     if (remainder >= (width+1U)/2U) { whole++; }
-    return previous_y_ + (dy < 0 ? -static_cast<std::int64_t>(whole) :
-                                  static_cast<std::int64_t>(whole));
+    return static_cast<std::int32_t>(previous_y_ + (dy < 0 ? -static_cast<std::int64_t>(whole) :
+                                  static_cast<std::int64_t>(whole)));
 }
 
-void WaveformProjector::merge(std::uint16_t column, std::int64_t y) noexcept
+void WaveformProjector::merge(std::uint16_t column, std::int32_t y) noexcept
 {
     auto& result = output_->columns[column];
     const bool clipped = y < 0 || y >= view_.height;
-    const auto bounded = static_cast<std::int16_t>(std::clamp<std::int64_t>(y,0,view_.height-1U));
+    const auto bounded = static_cast<std::int16_t>(std::clamp<std::int32_t>(y,0,static_cast<std::int32_t>(view_.height)-1));
     if (!result.valid) { result.top = bounded; result.bottom = bounded; result.valid = true; }
     else { result.top = std::min(result.top,bounded); result.bottom = std::max(result.bottom,bounded); }
     result.clipped = result.clipped || clipped;
