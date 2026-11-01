@@ -115,29 +115,25 @@ bool Ili9341Display::window(std::uint16_t x0, std::uint16_t y0,
     if (!bus_.select(bus_.context, true)) {
         return fail_bus();
     }
+    const std::uint8_t bytes[]{0x2aU,
+        static_cast<std::uint8_t>(x0 >> 8U),static_cast<std::uint8_t>(x0),
+        static_cast<std::uint8_t>(x1 >> 8U),static_cast<std::uint8_t>(x1),0x2bU,
+        static_cast<std::uint8_t>(y0 >> 8U),static_cast<std::uint8_t>(y0),
+        static_cast<std::uint8_t>(y1 >> 8U),static_cast<std::uint8_t>(y1),0x2cU};
     if (bus_.write_sequence != nullptr) {
-        const std::uint8_t bytes[]{0x2aU,
-            static_cast<std::uint8_t>(x0 >> 8U),static_cast<std::uint8_t>(x0),
-            static_cast<std::uint8_t>(x1 >> 8U),static_cast<std::uint8_t>(x1),0x2bU,
-            static_cast<std::uint8_t>(y0 >> 8U),static_cast<std::uint8_t>(y0),
-            static_cast<std::uint8_t>(y1 >> 8U),static_cast<std::uint8_t>(y1),0x2cU};
         return bus_.write_sequence(bus_.context,bytes,11U,0x03deU) || fail_bus();
     }
-    const std::uint8_t columns[]{static_cast<std::uint8_t>(x0 >> 8U),
-        static_cast<std::uint8_t>(x0), static_cast<std::uint8_t>(x1 >> 8U),
-        static_cast<std::uint8_t>(x1)};
-    const std::uint8_t rows[]{static_cast<std::uint8_t>(y0 >> 8U),
-        static_cast<std::uint8_t>(y0), static_cast<std::uint8_t>(y1 >> 8U),
-        static_cast<std::uint8_t>(y1)};
-    if (!put(false, 0x2aU)) { return false; }
-    for (const auto value : columns) {
+    if (!put(false, bytes[0])) { return false; }
+    for (unsigned index{1U}; index <= 4U; ++index) {
+        const auto value = bytes[index];
         if (!put(true, value)) { return false; }
     }
-    if (!put(false, 0x2bU)) { return false; }
-    for (const auto value : rows) {
+    if (!put(false, bytes[5])) { return false; }
+    for (unsigned index{6U}; index <= 9U; ++index) {
+        const auto value = bytes[index];
         if (!put(true, value)) { return false; }
     }
-    return put(false, 0x2cU);
+    return put(false, bytes[10]);
 }
 
 bool Ili9341Display::write_span(std::uint16_t x, std::uint16_t y,

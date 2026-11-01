@@ -90,3 +90,17 @@ A configured build combining these helpers and the scratch change has a 61,224-b
 Sharing base capture-field validation between acquisition and saved-record decoding passed six relevant native suites, but a clean target comparison produced identical section sizes and a 61,280-byte span. The differing Auto-timeout policies remained separate. This refactor was not adopted as a footprint optimization.
 
 Sharing signed rounding across scaling, measurements, and calibration saved 160 bytes in an isolated target build and passed six numeric suites. However, LTO introduced calls in foreground projection, a 16-byte helper frame, and an increased idle frame. That candidate is unaccepted pending evaluation of an inline variant and its performance consequences.
+
+Forcing the shared rounding helper inline removed its calls and restored the baseline idle frame, but increased the image by 32 bytes against baseline. That variant was rejected. The ordinary shared version remains unaccepted because its projection-path timing has not been established.
+
+A symmetric FIR prototype stored only half the coefficients and paired symmetric history samples. A bit-exact oracle passed 78,660 input calls across adversarial/random streams, clipping, invalid-input latch and reset cases; three decimator/transition suites passed. However, 56 fewer bytes of read-only data were offset by 56 more code bytes, leaving the full load span unchanged. It was not adopted for this Flash objective. Fewer multiplies alone do not establish target execution time.
+
+## Display window encoding
+
+The portable LCD driver encoded the same coordinate bytes separately for the optional sequence transport and byte fallback. One shared 11-byte packet now feeds both paths, retaining the sequence count/mask and the fallback's two four-byte data loops and command order. An isolated configured build saved 48 bytes; the window function shrank from 254 to 206 bytes with unchanged static RAM. Existing protocol/GRAM, asynchronous transfer/cancellation/fault/fallback and rectangle suites passed. Aggregate measurements with the other accepted source changes follow when verified.
+
+The aggregate configured image with scratch clearing removed, compact label selection and shared LCD encoding ends at 0x0800EEF8: 61,176 bytes, saving 104 bytes and leaving 264 bytes of application Flash. Initialized RAM (112 bytes), BSS (14,204 bytes), and stack reservation/alignment (2,052 bytes) are unchanged. Inspected frames remain idle 384 bytes, main 184, scene 192, storage service 224 and LCD window 40. The sequence fast path retains the same callback sequence and packet. UI/storage/calibration and display/async/rectangle suites passed against the aggregate source. No hardware timing claim or deployment is made.
+
+## Further compiler configuration comparisons
+
+Independent builds on the scratch-and-label source (61,224-byte span) produced: `-fno-ipa-sra` 61,288 bytes; `-fno-partial-inlining` 61,256; `-fno-ipa-cp-clone` 61,224; and `-flto-partition=none` 61,232. Static RAM was unchanged. None was adopted. These results precede the display encoding change; they do not prove the behavior of combinations or different source revisions. GCC reports that IPA cloning is disabled at `-Os`, so explicitly enabling it warrants a separate experiment.
