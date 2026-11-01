@@ -1,0 +1,32 @@
+# Build products and IDE workspace state
+**/Debug/
+**/Release/
+**/.metadata/
+**/.settings/language.settings.xml
+*.o
+*.obj
+*.elf
+*.map
+*.list
+*.su
+*.cyclo
+*.log
+*.zip
+
+# Local development material is outside this source/documentation repository
+/tests/
+/tools/
+/.tools/
+/.research/
+/build/
+**/.preparation-inputs/
+__pycache__/
+*.pyc
+
+# LaTeX intermediates; keep the manual PDF and its editable source
+*.aux
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk

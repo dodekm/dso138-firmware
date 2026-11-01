@@ -1,0 +1,23 @@
+* text=auto eol=lf
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.S text eol=lf
+*.s text eol=lf
+*.ld text eol=lf
+*.md text eol=lf
+*.tex text eol=lf
+*.yml text eol=lf
+*.ioc text eol=lf
+*.cproject text eol=lf
+*.project text eol=lf
+*.svg text eol=lf
+*.pdf binary
+firmware/Drivers/** linguist-vendored whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+firmware/Startup/** linguist-vendored whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+firmware/Src/system_stm32f1xx.c linguist-vendored whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+docs/manual/*.tex linguist-documentation
+licenses/runtime/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+firmware/Src/LICENSE -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+firmware/Startup/LICENSE -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

@@ -1,0 +1,71 @@
+name: Hardware bug report
+description: Report a reproducible issue on a DSO138 board.
+title: "[Hardware] "
+labels: [hardware]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include your MCU's private 96-bit UID, ST-Link serial number, or other private identifiers.
+  - type: input
+    id: board
+    attributes:
+      label: PCB revision
+      description: For example, 109-13800-00C.
+      placeholder: Board revision or unknown
+    validations:
+      required: true
+  - type: input
+    id: mcu
+    attributes:
+      label: MCU marking
+      placeholder: STM32F103C8T6 or unknown
+    validations:
+      required: true
+  - type: input
+    id: display
+    attributes:
+      label: LCD controller
+      placeholder: ILI9341 or unknown
+    validations:
+      required: false
+  - type: textarea
+    id: firmware
+    attributes:
+      label: Firmware configuration
+      description: Describe relevant build settings; do not include UID values.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: input
+    id: supply
+    attributes:
+      label: Supply voltage and setup
+      placeholder: e.g. nominal 9 V supply; describe setup
+    validations:
+      required: false
+  - type: input
+    id: signal
+    attributes:
+      label: Input signal, coupling, sensitivity and timebase
+      description: Include signal voltage/frequency if known and safe to share.
+    validations:
+      required: false
+  - type: textarea
+    id: photo
+    attributes:
+      label: Optional photo or supporting detail
+      description: You may attach a photo of the board or screen. Remove private identifiers first.
+    validations:
+      required: false
