@@ -38,23 +38,28 @@ constexpr std::int32_t MaximumZero{4095 * 65536};
 struct Quotient final { std::uint64_t whole; std::uint64_t remainder; };
 
 // Exact(a*b)/d without a128-bit product. The checked product handles common
-// viewport ratios directly; wide products use the bounded64-step remainder loop.
+// viewport ratios directly; wide products use a bounded32-step remainder loop.
 // Callers bound the final quotient and denominator; addition stays below2*d.
-Quotient mul_div(std::uint64_t a, std::uint64_t b, std::uint64_t d) noexcept
+static_assert(WaveformColumnCapacity <= UINT32_MAX / 1000000U,
+              "sample-position width multiplier must fit uint32");
+
+Quotient mul_div_width(std::uint64_t a, std::uint32_t b, std::uint64_t d) noexcept
 {
+    // In sample_position_x, b = width * 1,000,000, at most 320,000,000.
+    // Its 32-bit bound permits a 32-step exact fractional quotient.
     if (b == 0U || a <= UINT64_MAX / b) {
         const auto product = a * b;
         return {product / d,product % d};
     }
     const auto integral = a / d;
     const auto fractional = a % d;
-    std::uint64_t quotient{};
+    std::uint32_t quotient{};
     std::uint64_t remainder{};
-    for (unsigned bit = 64U; bit > 0U; --bit) {
+    for (unsigned bit = 32U; bit > 0U; --bit) {
         quotient *= 2U;
         remainder *= 2U;
         if (remainder >= d) { remainder -= d; quotient++; }
-        if ((b & (std::uint64_t{1U} << (bit - 1U))) != 0U) {
+        if ((b & (std::uint32_t{1U} << (bit - 1U))) != 0U) {
             remainder += fractional;
             if (remainder >= d) { remainder -= d; quotient++; }
         }
@@ -94,8 +99,8 @@ std::int64_t sample_position_x(std::uint16_t index, std::uint16_t pretrigger,
 {
     const auto delta = std::int64_t{index} - pretrigger - view.horizontal_offset_samples;
     const auto magnitude = static_cast<std::uint64_t>(delta < 0 ? -delta : delta);
-    const auto q = mul_div(magnitude * divider,
-                           std::uint64_t{view.width} * 1000000U,
+    const auto q = mul_div_width(magnitude * divider,
+                           std::uint32_t{view.width} * 1000000U,
                            std::uint64_t{timer_hz} * view.time_us_per_div * 10U);
     const auto offset = static_cast<std::int64_t>(q.whole +
         (delta < 0 && q.remainder != 0U ? 1U : 0U));
@@ -226,10 +231,16 @@ std::int64_t WaveformProjector::segment_y(std::int64_t column) const noexcept
     const auto dy = target_y_ - previous_y_;
     const auto delta_x = static_cast<std::uint64_t>(column - previous_x_);
     const auto width = static_cast<std::uint64_t>(target_x_ - previous_x_);
-    auto q = mul_div(static_cast<std::uint64_t>(dy < 0 ? -dy : dy),delta_x,width);
-    if (q.remainder >= (width+1U)/2U) { q.whole++; }
-    return previous_y_ + (dy < 0 ? -static_cast<std::int64_t>(q.whole) :
-                                  static_cast<std::int64_t>(q.whole));
+    // Adjacent source samples have |dy| < 2^26 and |delta_x| < 2^34:
+    // validated voltage calibration bounds |sample_y| below 25.8M, and the
+    // largest accepted divider/viewport ratio is below 2^34. Their product
+    // is below 2^60, so the exact signed interpolation numerator fits uint64.
+    const auto product = static_cast<std::uint64_t>(dy < 0 ? -dy : dy) * delta_x;
+    auto whole = product / width;
+    const auto remainder = product % width;
+    if (remainder >= (width+1U)/2U) { whole++; }
+    return previous_y_ + (dy < 0 ? -static_cast<std::int64_t>(whole) :
+                                  static_cast<std::int64_t>(whole));
 }
 
 void WaveformProjector::merge(std::uint16_t column, std::int64_t y) noexcept
