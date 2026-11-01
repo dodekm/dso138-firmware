@@ -56,6 +56,9 @@ public:
     [[nodiscard]] std::uint32_t next_sequence() const noexcept { return next_sequence_; }
     [[nodiscard]] std::uint32_t trigger_sequence() const noexcept { return trigger_sequence_; }
     [[nodiscard]] bool edge_triggered() const noexcept { return edge_triggered_; }
+    // Foreground-only, one-consumer sticky indication. Arm/stop leave it pending.
+    [[nodiscard]] bool take_accepted_edge() noexcept
+    { const auto pending = accepted_edge_pending_; accepted_edge_pending_ = false; return pending; }
 
 private:
     [[nodiscard]] bool active() const noexcept;
@@ -72,6 +75,7 @@ private:
     std::uint16_t remaining_{};
     ThresholdCrossing crossing_{};
     bool edge_triggered_{};
+    bool accepted_edge_pending_{};
     std::uint16_t samples_[CaptureCapacity]{};
 };
 

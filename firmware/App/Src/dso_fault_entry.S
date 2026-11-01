@@ -134,6 +134,14 @@ dso_fault_common:
     beq .Lcss
     orr r3, r3, #0x1000000
 .Lcss:
+    /* Release the active-low PA15 indicator without a stack or C++ callback.
+     * A clock-off port is never accessed; mode and SWD pins stay untouched. */
+    tst r6, #4                  /* RCC_APB2ENR.IOPAEN. */
+    beq .Lcss_flags
+    ldr r1, =0x40010810         /* GPIOA_BSRR: set only the PA15 latch HIGH. */
+    movw r2, #0x8000
+    str r2, [r1]
+.Lcss_flags:
     tst r4, #0x80
     beq .Lrecord
     orr r3, r3, #0x10

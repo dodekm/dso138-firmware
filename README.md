@@ -2,7 +2,7 @@
 
 C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HAL for the STM32F103C8T6 in STM32CubeIDE. This repository provides the application source, CubeIDE project, and practical documentation for owners and developers.
 
-[User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Compatibility](docs/compatibility.md)
+[User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
 ![Illustrative DSO138 screen preview](docs/screen-preview.svg)
 
@@ -17,6 +17,7 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 | Acquisition | Timer-triggered ADC with DMA; configured rate up to 500 kS/s |
 | Timebase | 24 settings from 10 µs/div to 500 s/div; filtered rolling view for slow settings |
 | Controls | Auto, Normal and Single trigger, Run/Hold, trigger position, physical switches and four buttons |
+| Trigger indication | D3 flashes on accepted trigger crossings; see [Trigger LED behavior](docs/trigger-led.md) |
 | Measurements | Frequency, peak-to-peak, mean and RMS when valid for the capture |
 | Records | Save and recall waveforms and settings; independent calibration store |
 

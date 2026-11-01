@@ -27,7 +27,7 @@
 \definecolor{trace}{HTML}{FFE15C}
 \hypersetup{pdftitle={DSO138 Oscilloscope User Manual},
   pdfauthor={DSO138 Firmware Project},
-  pdfsubject={Operating guide for the implemented C++ firmware, build b73cdcb1},
+  pdfsubject={Operating guide for DSO138 public source release 1.0.1},
   colorlinks=true,linkcolor=teal,urlcolor=teal,bookmarksopen=true}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt}
@@ -45,7 +45,7 @@
 \fancyhf{}
 \fancyhead[L]{\small\bfseries\color{navy}DSO138}
 \fancyhead[R]{\small\color{muted}USER MANUAL}
-\fancyfoot[L]{\footnotesize\color{muted}Manual 1.0 \enspace|\enspace Firmware b73cdcb1}
+\fancyfoot[L]{\footnotesize\color{muted}Manual 1.1 \enspace|\enspace Firmware source 1.0.1}
 \fancyfoot[R]{\footnotesize\color{muted}\thepage\,/\,\pageref*{LastPage}}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
@@ -144,8 +144,8 @@
 \end{minipage}
 \vfill
 {\small\color{muted}
-Manual revision 1.0 \enspace|\enspace 1 November 2026\par
-Firmware identity: \texttt{b73cdcb1} (ELF SHA-256 prefix)\par
+Manual revision 1.1 \enspace|\enspace 1 November 2026\par
+Firmware source release: \texttt{1.0.1} (UID-configured build required)\par
 Intended hardware: PCB 109-13800-00C, STM32F103C8T6, ILI9341 display.\par
 This guide describes the implemented controls and functions.
 Nominal readings are not a calibration certificate.}
@@ -155,6 +155,8 @@ Nominal readings are not a calibration certificate.}
 \begin{manualnote}{Board and power}
 This guide is for the identified DSO138 board, PCB 109-13800-00C, with STM32F103C8T6 and ILI9341 display. Use the board's normal 9 V DC input as marked on the board. For bench work, use a low-voltage isolated supply and connect signal ground to the scope ground. Use only isolated low-voltage bench signals; never connect the scope input or ground directly to mains. Do not infer a safe maximum input from this guide; observe the board markings and its analog input limits.
 \end{manualnote}
+
+This operating guide assumes a correctly configured firmware image. The public 1.0.1 source requires each owner to set the MCU UID and board identity before normal startup; see the repository's Getting started guide.
 
 \subsection*{Try the built-in signal}
 \begin{enumerate}
@@ -199,6 +201,9 @@ Base sensitivity & Multiplier \(\times1\) & Multiplier \(\times2\) & Multiplier 
 The separate coupling switch selects DC, AC, or GND.
 
 The table gives the nine nominal ranges. The separate coupling switch selects DC (shows the input offset), AC (blocks DC), or GND (selects the internal ground path). These are front-panel sensitivity labels. They do not confirm the input voltage or a probe's attenuation. If using a \(\times10\) probe, account for that factor yourself; there is no probe-attenuation menu.
+
+\subsection*{Trigger activity LED}
+D3 gives a brief, about 100 ms indication for an accepted trigger crossing; another crossing restarts the pulse, so close events may look continuously lit. Auto free-run timeout, recall/HOLD redraw and slow Auto ROLL do not light it. On slow Normal or Single, an accepted edge may light it before the processed record is ready. A Single pulse can finish through automatic HOLD; faults leave it off. This software cue is not a precise timing strobe and has not been tested on flashed 1.0.1 hardware.
 
 \manualpage{Reading the screen}{screen}
 
@@ -400,11 +405,11 @@ There are 24 settings. Fast acquisition uses a configured maximum of 500 ksample
 \textbf{Voltage and probe limits.} Nominal range labels and \lcd{NOM} conversion use board coefficients; they are not a production calibration. \lcd{CAL} indicates a measured profile is installed, but does not replace independent verification. \lcd{RAW} provides codes, not input volts. No probe attenuation is selected by firmware; multiply displayed input estimates by the probe factor when applicable. Do not treat the onboard signal as an absolute reference. No maximum safe input is specified here: follow the board's own input markings and limits.
 
 \begin{manualnote}{Firmware identity and qualification}
-This manual describes the b73 firmware image deployed to the identified board profile, with nominal gain-2 coefficients and a grounded-zero code. The reported build image SHA-256 begins \texttt{b73cdcb1c644}. Software features and selected functional checks do not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, slow-path performance and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
+The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. LED pulse, acquisition handoff and startup/fault sequencing passed software checks; 1.0.1 has not been flashed or tested on hardware. This does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, slow-path performance and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
 \end{manualnote}
 
 \vfill
-\begin{center}\footnotesize Manual revision: 1 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
+\begin{center}\footnotesize Manual revision 1.1: 1 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
 
 
 \end{document}

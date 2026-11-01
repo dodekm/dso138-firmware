@@ -87,6 +87,8 @@ public:
     [[nodiscard]] DmaRingFault transport_fault() const noexcept { return monitor_.fault(); }
     [[nodiscard]] std::uint16_t record_length() const noexcept { return capture_.config().length; }
     [[nodiscard]] std::uint32_t trigger_sequence() const noexcept { return capture_.trigger_sequence(); }
+    // Foreground-only one-consumer event; never call from an ISR.
+    [[nodiscard]] bool take_accepted_edge() noexcept { return capture_.take_accepted_edge(); }
     [[nodiscard]] std::uint32_t discarded_tail_samples() const noexcept { return tail_samples_; }
     // Foreground-only cumulative counters, saturating rather than wrapping.
     [[nodiscard]] const AcquisitionStatistics& statistics() const noexcept { return statistics_; }

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Narrow C boundary for CubeMX-generated startup. Bench scaffold only.
+/* Narrow C boundary for platform startup and interrupts.
  * Foreground-only, including Error_Handler before it masks interrupts.
  * Do not call C++ owners from HardFault or acquisition interrupt handlers.
  * Initialization is once per reset; a fatal application fault is terminal.
@@ -35,8 +35,16 @@ typedef struct DsoBenchStatus {
 } DsoBenchStatus;
 extern DsoBenchStatus dso_bench_status;
 
+/* Startup and terminal failure are rare paths; keep size optimization here
+ * independent of the acquisition service loop. */
+#if defined(__GNUC__)
+__attribute__((cold))
+#endif
 void dso_app_init(void);
 void dso_app_idle(void);
+#if defined(__GNUC__)
+__attribute__((cold))
+#endif
 void dso_app_fault(uint32_t reason);
 /* Establish 8-byte exception-entry stack alignment before HAL_Init enables SysTick. */
 uint32_t dso_app_prepare_core(void);

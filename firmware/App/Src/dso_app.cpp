@@ -4,6 +4,7 @@
 #include "dso_acquisition.hpp"
 #include "dso_panel_sampler.hpp"
 #include "dso_stm32_acquisition.hpp"
+#include "dso_trigger_led.hpp"
 #include "dso_stm32_panel.hpp"
 #include "dso_stm32_display.hpp"
 #include "dso_stm32_analog_power.hpp"
@@ -142,6 +143,7 @@ extern "C" void dso_app_fault(std::uint32_t reason)
     // later idle/init calls cannot start work or turn a fault into a healthy boot.
     dso_bench_status.fault = reason;
     dso_bench_status.phase = DSO_BENCH_FAULT;
+    dso::cancel_stm32_trigger_led();
     // End an outstanding LCD DMA borrow before any foreground owner can be
     // destroyed/reused. With no active transfer this performs no bus access.
     screen.cancel();
@@ -174,6 +176,7 @@ extern "C" void dso_app_init(void)
 
 #if DSO_BOARD_BRINGUP
     if (!dso::activate_bringup_board(display)) { dso_app_fault(7U); return; }
+    dso::initialize_stm32_trigger_led();
 #if DSO_BOARD_STORAGE
     // UID and flash size have now passed the board activation gate. This is
     // still before panel_sampler.start or acquisition, and the adapter checks
@@ -270,6 +273,10 @@ extern "C" void dso_app_idle(void)
     }
 #endif
     const auto ui_progress = scope_controller.service();
+    // Always drain both owner flags; events are discarded while the UI is unhealthy.
+    const bool accepted_edge = acquisition.take_accepted_edge() | rolling.take_accepted_edge();
+    dso::service_stm32_trigger_led(now, accepted_edge,
+        scope_controller.fault() == dso::UiControllerFault::None);
     dso_bench_status.ui_work = static_cast<std::uint32_t>(ui_progress.work);
 #if DSO_BOARD_ACQUISITION
     auto& debug = dso::dso_bringup_acquisition;

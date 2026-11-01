@@ -103,6 +103,9 @@ public:
     [[nodiscard]] RollingState state() const noexcept { return state_; }
     [[nodiscard]] RollingFault fault() const noexcept { return fault_; }
     [[nodiscard]] std::uint64_t revision() const noexcept { return next_sample_; }
+    // Foreground-only, one-consumer sticky indication. Arm/stop/release leave it pending.
+    [[nodiscard]] bool take_accepted_edge() noexcept
+    { const auto pending = accepted_edge_pending_; accepted_edge_pending_ = false; return pending; }
     [[nodiscard]] const RollingStatistics& statistics() const noexcept { return statistics_; }
 
 private:
@@ -144,6 +147,7 @@ private:
     RollingState state_{RollingState::Stopped};
     RollingFault fault_{RollingFault::None};
     bool triggered_{};
+    bool accepted_edge_pending_{};
 };
 
 } // namespace dso

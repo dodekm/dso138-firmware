@@ -187,6 +187,7 @@ bool RollingAcquisition::append(std::uint16_t sample, bool clipped, bool clamped
             const auto& capture = request_.capture;
             const auto hit = crossing_.update(sample, capture.level, capture.hysteresis, capture.edge);
             if (hit && before >= capture.pretrigger) {
+                accepted_edge_pending_ = true;
                 triggered_ = true;
                 trigger_sample_ = next_sample_;
                 remaining_ = static_cast<std::uint16_t>(RollingCapacity - capture.pretrigger - 1U);

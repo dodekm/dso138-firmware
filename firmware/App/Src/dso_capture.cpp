@@ -107,6 +107,7 @@ size_t Capture::push(const uint16_t *samples, size_t count,
             const bool timeout = config.mode == TriggerMode::Auto &&
                 waited >= config.auto_timeout_samples;
             if (history >= config.pretrigger && (hit || timeout)) {
+                if (hit) { accepted_edge_pending_ = true; }
                 trigger_sequence_ = sequence;
                 edge_triggered_ = hit;
                 remaining = static_cast<uint16_t>(config.length - config.pretrigger - 1U);

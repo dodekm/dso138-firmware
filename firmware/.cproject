@@ -52,6 +52,7 @@
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level.dso.Debug" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level" value="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level.value.os" valueType="enumerated" />
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.otherflags.dso.Debug" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.2026331357" name="MCU/MPU G++ Compiler" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler">
@@ -92,6 +93,7 @@
 									<listOptionValue builtIn="false" value="-Wpedantic" />
 									<listOptionValue builtIn="false" value="-Werror" />
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.887976247" name="MCU/MPU GCC Linker" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker">
@@ -102,6 +104,7 @@
 								</inputType>
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.option.otherflags.dso.Debug" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 									<listOptionValue builtIn="false" value="-flto-partition=one" />
 									<listOptionValue builtIn="false" value="-Os" />
 									<listOptionValue builtIn="false" value="-fstack-usage" />
@@ -119,6 +122,7 @@
 								</inputType>
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.otherflags.dso.Debug" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 									<listOptionValue builtIn="false" value="-flto-partition=one" />
 									<listOptionValue builtIn="false" value="-Os" />
 									<listOptionValue builtIn="false" value="-fstack-usage" />
@@ -212,6 +216,7 @@
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level.dso.Release" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level" value="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.optimization.level.value.os" valueType="enumerated" />
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.otherflags.dso.Release" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.703664778" name="MCU/MPU G++ Compiler" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler">
@@ -251,6 +256,7 @@
 									<listOptionValue builtIn="false" value="-Wpedantic" />
 									<listOptionValue builtIn="false" value="-Werror" />
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.2008431156" name="MCU/MPU GCC Linker" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker">
@@ -261,6 +267,7 @@
 								</inputType>
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.option.otherflags.dso.Release" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.linker.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 									<listOptionValue builtIn="false" value="-flto-partition=one" />
 									<listOptionValue builtIn="false" value="-Os" />
 									<listOptionValue builtIn="false" value="-fstack-usage" />
@@ -278,6 +285,7 @@
 								</inputType>
 								<option id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.otherflags.dso.Release" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.otherflags" valueType="stringList">
 									<listOptionValue builtIn="false" value="-flto" />
+									<listOptionValue builtIn="false" value="-fipa-pta" />
 									<listOptionValue builtIn="false" value="-flto-partition=one" />
 									<listOptionValue builtIn="false" value="-Os" />
 									<listOptionValue builtIn="false" value="-fstack-usage" />
