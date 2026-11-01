@@ -15,6 +15,8 @@ constexpr std::int32_t coefficient_absolute_sum() noexcept
     return result;
 }
 constexpr auto AbsoluteSum = coefficient_absolute_sum();
+static_assert(SlowDecimator::Taps > 0U && SlowDecimator::Taps < 64U,
+              "Clipping history mask requires fewer taps than uint64 width");
 // Round nearest, ties away from zero, without implementation-defined signed
 // right shifts. Centered inputs leave enough signed16-bit headroom for every
 // possible12-bit input pattern, including adversarial alternating extremes.
@@ -46,8 +48,9 @@ bool SlowDecimator::Stage::push(std::int16_t sample, bool raw_clipped,
                                std::int16_t& output, bool& clipped_output) noexcept
 {
     history[cursor] = sample;
-    const auto bit = std::uint64_t{1U} << cursor;
-    clipped = (clipped & ~bit) | (raw_clipped ? bit : 0U);
+    // Private clipping history is queried only for nonzero; bit0 is newest.
+    clipped = ((clipped << 1U) | std::uint64_t{raw_clipped}) &
+        ((std::uint64_t{1U} << Taps) - 1U);
     cursor = static_cast<std::uint8_t>(cursor + 1U);
     if (cursor == Taps) { cursor = 0U; }
     if (filled < Taps) { ++filled; }

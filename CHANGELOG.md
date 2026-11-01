@@ -6,6 +6,7 @@
 - Replace copy-on-write saving with a single bank. Power loss during erase/programming can lose the previous saved waveform, settings and calibration; checksums and commit validation still reject incomplete records.
 - Stage the complete payload in bounded RAM before erasing, preserving existing waveform data when saving only settings or calibration.
 - Simplify storage to one record with no mutable bank address/selector, and avoid clearing staged bytes that are completely overwritten before use.
+- Track slow-filter clipping with a fixed-width shift register instead of cursor-dependent 64-bit masks, preserving the exact 63-sample history while reducing code size.
 - Share LCD coordinate encoding, compact UI label selection and remove redundant scratch clearing.
 - The old lower storage bank becomes application space; existing saved records are not guaranteed to migrate. No new hardware deployment is claimed.
 

@@ -27,7 +27,7 @@ Private software checks passed 46 LED/GPIO/Capture cases, the rolling acquisitio
 
 ## Size optimization and future headroom
 
-The unreleased single-bank revision has a configured Release load span of 60,864 bytes within a 63,488-byte application region, leaving 2,624 bytes. The final 2,048 bytes are reserved for storage. RAM comprises 112 bytes of initialized data, 16,204 bytes of BSS and 2,052 bytes of stack reservation/alignment, leaving 2,112 bytes of the 20 KiB SRAM unallocated. These are configured-build software measurements, not hardware qualification. Persistent payload staging uses 2,016 bytes of owned RAM; no heap allocation was introduced.
+The unreleased single-bank revision has a configured Release load span of 60,824 bytes within a 63,488-byte application region, leaving 2,664 bytes. The final 2,048 bytes are reserved for storage. RAM comprises 112 bytes of initialized data, 16,204 bytes of BSS and 2,052 bytes of stack reservation/alignment, leaving 2,112 bytes of the 20 KiB SRAM unallocated. These are configured-build software measurements, not hardware qualification. Persistent payload staging uses 2,016 bytes of owned RAM; no heap allocation was introduced.
 
 Both configurations retain `-Os`, LTO with one partition, section garbage collection and the existing non-LTO Capture translation unit. They now enable `-fipa-pta` for more precise interprocedural pointer analysis; startup and terminal application fault handlers have cold-path hints. No ABI or floating-point semantics were changed.
 
