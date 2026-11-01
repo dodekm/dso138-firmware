@@ -723,7 +723,8 @@ void ScopeController::service_storage() noexcept
         const bool restore_bank = storage_command_ != StorageCommand::RecallWaveform;
         const auto remaining = static_cast<std::uint16_t>(record->calibration_bytes - copied_);
         const auto count = static_cast<std::uint16_t>(remaining > 32U ? 32U : remaining);
-        std::uint8_t scratch[32]{};
+        // A successful read fills the consumed bytes; failures return before use.
+        std::uint8_t scratch[32];
         auto* bytes = restore_bank ? reinterpret_cast<std::uint8_t*>(acquisition_.dma_) + copied_ : scratch;
         if (count != 0U && !store.read_selected_calibration(copied_, bytes, count)) { finish_storage(UiStorageStatus::Error); return; }
         for (std::uint16_t i{}; i < count; i = static_cast<std::uint16_t>(i + 2U)) {
