@@ -331,3 +331,27 @@ Native checks pass all 18 timer plans, 18,810 trigger coordinates, 15,120 ramp c
 The common projection frame remains 48 bytes; the rare fallback adds a 32-byte nested helper frame. An exact-binary call-graph audit includes that new edge and still bounds foreground at 1,348 bytes and foreground plus conservative IRQ allowance at 1,560 bytes. All 46 reachable indirect sites are mapped; no unresolved calls or recursion remain. The minimum usable stack remains 2,048 bytes, giving 488 bytes of static margin.
 
 Rejected alternatives remain outside the repository: moving all ratio work out of line saved 152 bytes but added a call per projected point; paired twiddle fetching grew the image by eight bytes; stage-batched FFT execution grew it by 32 bytes. Legacy filtered-record metadata remains necessary: a held filtered capture can legitimately be saved after selecting a supported viewport timebase. Removing the live slow acquisition backend does not make those saved records invalid.
+
+
+## Display and UI footprint checkpoint - 2026-11-02
+
+The configured application now occupies **59,440 bytes**, ending at **0x0800E830**, and leaves **4,048 bytes** before the unchanged storage region. This is a **176-byte saving** from the preceding 59,616-byte build. The configured runtime binary SHA-256 is `4936FEC072CE5739B306E51FA54B655FDEFF69299D9ED64FD8D44F8D49D1111B`.
+
+| Change, measured independently against 59,616 B | Load span | Saving |
+| --- | ---: | ---: |
+| Bounded 32-bit UI integer conversion | 59,560 B | 56 B |
+| Checked byte-offset label tables | 59,544 B | 72 B |
+| Shared LCD byte-mode window-command loop | 59,568 B | 48 B |
+| Combined accepted implementation | 59,440 B | 176 B |
+
+The formatter's direct integer counters and decimal whole parts fit uint32_t under the accepted UI, calibration, capture and timer bounds. Its integer digit buffer therefore needs ten bytes rather than twenty. Fractional arithmetic remains 64-bit with unchanged rounding. The signed helper is used only for references within +/-100,000,000 microvolts and bounded screen/sample offsets. Direct formatter oracles run first on the unchanged baseline and then the merged source; their output agrees at integer limits, sign/unit transitions, Q16 fractions and dirty-range tail clearing.
+
+Storage, frequency-status and calibration-status labels now use NUL-separated readable pools and byte offsets instead of pointer tables. Compile-time checks cover the complete strings, pool bounds, fallback labels and every relied-upon enum ordinal. Runtime selection adds a bounded indexed byte lookup and pointer addition during stopped-producer formatting. It adds no character decoding, glyph-level call or allocation. All valid enum values and invalid fallbacks match the earlier labels in a native oracle.
+
+The LCD byte-mode fallback uses the same command/data bit mask as the existing fast sequence callback. One fixed eleven-byte loop replaces three individual command writes and two parameter loops. The 11 bytes, D/C values, error exit ordering and select lifetime are preserved. The normal board's fast write_sequence path is unchanged.
+
+Fresh canonical-source native tests pass the label oracle, display protocol/GRAM, clipping/recovery, asynchronous chunk/cancel/fault/fallback and rectangle suites. The controller suite completes 200 Single capture/FFT/render/rearm cycles and 20 successive spectra each in Auto and Normal without intervening controls. Fresh CubeIDE Release and Debug builds reproduce the combined runtime image. Test scripts, experimental sources and native artifacts remain outside the release repository.
+
+Initialized data stays at 112 bytes and BSS at 14,468; heap remains zero and unallocated SRAM stays at 3,848 bytes. An exact-runtime-binary call-graph rebuild maps all 46 reachable indirect sites, with no missing direct targets or recursion. Maximum foreground stack falls from 1,348 to 1,332 bytes because integer formatting's frame falls from 56 to 40. The unchanged conservative IRQ allowance of 212 gives a 1,544-byte bound and 504-byte margin against the 2,048-byte usable minimum stack; alignment padding is excluded.
+
+Rejected trials include merging dashed-line passes, immutable display callbacks and cold display-error hints (no saving); per-file rendering -Oz (56-152 bytes larger individually); constant initialization of screen or calibration state (less startup code but larger Flash-initialized data); two calibration scan/serialization rewrites (40 and 64 bytes larger); narrower formatter indices (larger); and constructor/destructor outlining (no saving or larger). An apparently redundant calibration guard was already eliminated by the compiler. Calibration features, validation, profile compatibility and the independent check point are retained. No new hardware timing, flashing or speed improvement is claimed.

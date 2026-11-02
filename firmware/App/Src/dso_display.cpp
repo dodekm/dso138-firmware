@@ -120,20 +120,16 @@ bool Ili9341Display::window(std::uint16_t x0, std::uint16_t y0,
         static_cast<std::uint8_t>(x1 >> 8U),static_cast<std::uint8_t>(x1),0x2bU,
         static_cast<std::uint8_t>(y0 >> 8U),static_cast<std::uint8_t>(y0),
         static_cast<std::uint8_t>(y1 >> 8U),static_cast<std::uint8_t>(y1),0x2cU};
+    // Commands occupy positions 0, 5 and 10; all other bytes are parameters.
+    constexpr std::uint16_t DataBits{0x03deU};
     if (bus_.write_sequence != nullptr) {
-        return bus_.write_sequence(bus_.context,bytes,11U,0x03deU) || fail_bus();
+        return bus_.write_sequence(bus_.context,bytes,11U,DataBits) || fail_bus();
     }
-    if (!put(false, bytes[0])) { return false; }
-    for (unsigned index{1U}; index <= 4U; ++index) {
-        const auto value = bytes[index];
-        if (!put(true, value)) { return false; }
+    for (unsigned index{}; index < 11U; ++index) {
+        const bool data = (DataBits & (1U << index)) != 0U;
+        if (!put(data, bytes[index])) { return false; }
     }
-    if (!put(false, bytes[5])) { return false; }
-    for (unsigned index{6U}; index <= 9U; ++index) {
-        const auto value = bytes[index];
-        if (!put(true, value)) { return false; }
-    }
-    return put(false, bytes[10]);
+    return true;
 }
 
 bool Ili9341Display::write_span(std::uint16_t x, std::uint16_t y,

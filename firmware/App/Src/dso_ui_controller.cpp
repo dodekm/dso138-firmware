@@ -6,6 +6,106 @@
 
 namespace dso {
 namespace {
+template<std::size_t PoolSize, std::size_t Count, std::size_t OracleCount>
+constexpr bool label_pool_matches(const char (&pool)[PoolSize], const std::uint8_t (&offsets)[Count],
+                                  const char* const (&oracle)[OracleCount]) noexcept
+{
+    if (Count != OracleCount || PoolSize >= 256U) { return false; }
+    for (std::size_t label{}; label < Count; ++label) {
+        if (offsets[label] >= PoolSize) { return false; }
+        std::size_t byte{};
+        do {
+            if (byte >= PoolSize - offsets[label]) { return false; }
+            if (pool[offsets[label] + byte] != oracle[label][byte]) { return false; }
+        } while (oracle[label][byte++] != '\0');
+    }
+    return true;
+}
+template<std::size_t PoolSize, std::size_t Count>
+constexpr const char* compact_label(const char (&pool)[PoolSize], const std::uint8_t (&offsets)[Count],
+                                    std::size_t index, std::size_t invalid) noexcept
+{
+    return pool + offsets[index < Count ? index : invalid];
+}
+constexpr bool label_equals(const char* actual, const char* expected) noexcept
+{
+    for (std::size_t i{};; ++i) {
+        if (actual[i] != expected[i]) { return false; }
+        if (expected[i] == '\0') { return true; }
+    }
+}
+
+// Offsets follow each enum's named ordinal order. Compile-time oracles below
+// bind both the packed text and the enum values so reordering requires a review.
+constexpr char StorageActionPool[] = "SAVE WAVE\0RECALL WAVE\0SAVE CONFIG\0LOAD CONFIG\0SAVE CAL\0RESTORE CAL";
+constexpr std::uint8_t StorageActionOffsets[]{0U, 10U, 22U, 34U, 46U, 55U};
+constexpr const char* StorageActionOracle[]{"SAVE WAVE", "RECALL WAVE", "SAVE CONFIG", "LOAD CONFIG", "SAVE CAL", "RESTORE CAL"};
+static_assert(label_pool_matches(StorageActionPool, StorageActionOffsets, StorageActionOracle), "Storage action labels/offsets changed");
+static_assert(static_cast<std::size_t>(StorageAction::SaveWaveform) == 0U &&
+              static_cast<std::size_t>(StorageAction::RecallWaveform) == 1U &&
+              static_cast<std::size_t>(StorageAction::SaveSettings) == 2U &&
+              static_cast<std::size_t>(StorageAction::RestoreSettings) == 3U &&
+              static_cast<std::size_t>(StorageAction::SaveCalibration) == 4U &&
+              static_cast<std::size_t>(StorageAction::RestoreCalibration) == 5U,
+              "Update storage action label order");
+constexpr char StorageStatusPool[] = "DISABLED\0SAVED\0RECALLED\0RESTORED\0EMPTY\0ERROR\0READ ONLY\0HOLD TO SAVE\0READY";
+constexpr std::uint8_t StorageStatusOffsets[]{0U, 68U, 68U, 9U, 15U, 24U, 33U, 39U, 45U, 55U};
+constexpr const char* StorageStatusOracle[]{"DISABLED", "READY", "READY", "SAVED", "RECALLED", "RESTORED", "EMPTY", "ERROR", "READ ONLY", "HOLD TO SAVE"};
+static_assert(label_pool_matches(StorageStatusPool, StorageStatusOffsets, StorageStatusOracle), "Storage status labels/offsets changed");
+static_assert(static_cast<std::size_t>(UiStorageStatus::Disabled) == 0U &&
+              static_cast<std::size_t>(UiStorageStatus::Idle) == 1U &&
+              static_cast<std::size_t>(UiStorageStatus::Busy) == 2U &&
+              static_cast<std::size_t>(UiStorageStatus::Saved) == 3U &&
+              static_cast<std::size_t>(UiStorageStatus::Recalled) == 4U &&
+              static_cast<std::size_t>(UiStorageStatus::Restored) == 5U &&
+              static_cast<std::size_t>(UiStorageStatus::Empty) == 6U &&
+              static_cast<std::size_t>(UiStorageStatus::Error) == 7U &&
+              static_cast<std::size_t>(UiStorageStatus::ReadOnly) == 8U &&
+              static_cast<std::size_t>(UiStorageStatus::HoldRequired) == 9U,
+              "Update storage status label order");
+constexpr char FrequencyStatePool[] = "OK\0LOW\0CYCLES\0FAST\0UNSTABLE\0CLIP\0GND\0RES";
+constexpr std::uint8_t FrequencyStateOffsets[]{0U, 3U, 7U, 14U, 19U, 28U, 33U, 37U};
+constexpr const char* FrequencyStateOracle[]{"OK", "LOW", "CYCLES", "FAST", "UNSTABLE", "CLIP", "GND", "RES"};
+static_assert(label_pool_matches(FrequencyStatePool, FrequencyStateOffsets, FrequencyStateOracle), "Frequency labels/offsets changed");
+static_assert(static_cast<std::size_t>(FrequencyStatus::Valid) == 0U &&
+              static_cast<std::size_t>(FrequencyStatus::LowAmplitude) == 1U &&
+              static_cast<std::size_t>(FrequencyStatus::InsufficientCycles) == 2U &&
+              static_cast<std::size_t>(FrequencyStatus::TooFast) == 3U &&
+              static_cast<std::size_t>(FrequencyStatus::Unstable) == 4U &&
+              static_cast<std::size_t>(FrequencyStatus::Clipped) == 5U &&
+              static_cast<std::size_t>(FrequencyStatus::Grounded) == 6U &&
+              static_cast<std::size_t>(FrequencyStatus::BelowResolution) == 7U,
+              "Update frequency label order");
+constexpr char CalibrationStagePool[] = "POINT 1\0POINT 2\0CHECK 3\0VERIFIED\0INSTALLED\0ABORTED\0FAILED\0IDLE";
+constexpr std::uint8_t CalibrationStageOffsets[]{58U, 0U, 8U, 16U, 24U, 33U, 43U, 51U};
+constexpr const char* CalibrationStageOracle[]{"IDLE", "POINT 1", "POINT 2", "CHECK 3", "VERIFIED", "INSTALLED", "ABORTED", "FAILED"};
+static_assert(label_pool_matches(CalibrationStagePool, CalibrationStageOffsets, CalibrationStageOracle), "Calibration stage labels/offsets changed");
+static_assert(static_cast<std::size_t>(CalibrationSessionState::Idle) == 0U &&
+              static_cast<std::size_t>(CalibrationSessionState::FirstReference) == 1U &&
+              static_cast<std::size_t>(CalibrationSessionState::SecondReference) == 2U &&
+              static_cast<std::size_t>(CalibrationSessionState::ValidationReference) == 3U &&
+              static_cast<std::size_t>(CalibrationSessionState::Verified) == 4U &&
+              static_cast<std::size_t>(CalibrationSessionState::Installed) == 5U &&
+              static_cast<std::size_t>(CalibrationSessionState::Aborted) == 6U &&
+              static_cast<std::size_t>(CalibrationSessionState::Failed) == 7U,
+              "Update calibration stage label order");
+constexpr char CalibrationFailurePool[] = "Need new reference\0Refs too close\0Bad slope\0Cal out of range\0Rounding failed\0Check 3 failed; BEGIN\0Check DC/session/refs";
+constexpr std::uint8_t CalibrationFailureOffsets[]{0U, 19U, 34U, 44U, 61U, 77U, 99U};
+constexpr const char* CalibrationFailureOracle[]{"Need new reference", "Refs too close", "Bad slope", "Cal out of range", "Rounding failed", "Check 3 failed; BEGIN", "Check DC/session/refs"};
+static_assert(label_pool_matches(CalibrationFailurePool, CalibrationFailureOffsets, CalibrationFailureOracle), "Calibration failure labels/offsets changed");
+static_assert(static_cast<std::size_t>(CalibrationStatus::StaleEpoch) == 5U &&
+              static_cast<std::size_t>(CalibrationStatus::InsufficientSpan) == 6U &&
+              static_cast<std::size_t>(CalibrationStatus::InvalidSlope) == 7U &&
+              static_cast<std::size_t>(CalibrationStatus::Unrepresentable) == 8U &&
+              static_cast<std::size_t>(CalibrationStatus::FitResidual) == 9U &&
+              static_cast<std::size_t>(CalibrationStatus::ValidationFailed) == 10U,
+              "Update calibration failure label range");
+static_assert(label_equals(compact_label(StorageActionPool, StorageActionOffsets, 99U, 5U), "RESTORE CAL"), "Invalid storage action fallback changed");
+static_assert(label_equals(StorageStatusPool + StorageStatusOffsets[1U], "READY"), "Invalid storage status fallback changed");
+static_assert(label_equals(compact_label(FrequencyStatePool, FrequencyStateOffsets, 99U, 7U), "RES"), "Invalid frequency fallback changed");
+static_assert(label_equals(compact_label(CalibrationStagePool, CalibrationStageOffsets, 99U, 0U), "IDLE"), "Invalid calibration stage fallback changed");
+static_assert(label_equals(compact_label(CalibrationFailurePool, CalibrationFailureOffsets, 6U, 6U), "Check DC/session/refs"), "Calibration failure fallback changed");
+
 // Small bounded formatter: no printf floating point, locale, heap, or hidden
 // std::string storage. SI case remains significant throughout the screen.
 class Text final {
@@ -40,9 +140,12 @@ public:
         }
         return *this;
     }
-    Text& number(std::uint64_t value) noexcept
+    // All formatter integer parts fit uint32_t: calibration input is bounded to +/-100 V,
+    // ADC-derived quantities cover at most 4095 codes, and decimal callers format
+    // bounded timer/sample/frequency ratios. Ten digits therefore cover every UI value.
+    Text& number(std::uint32_t value) noexcept
     {
-        char digits[20]{}; unsigned count{};
+        char digits[10]{}; unsigned count{};
         do { digits[count++] = static_cast<char>('0' + value % 10U); value /= 10U; } while (value != 0U);
         while (count != 0U) { const char one[]{digits[--count], '\0'}; add(one); }
         return *this;
@@ -50,12 +153,12 @@ public:
     Text& signed_number(std::int64_t value) noexcept
     {
         const auto magnitude = value < 0 ? static_cast<std::uint64_t>(-(value + 1)) + 1U : static_cast<std::uint64_t>(value);
-        if (value < 0) { add("-"); } return number(magnitude);
+        if (value < 0) { add("-"); } return number(static_cast<std::uint32_t>(magnitude));
     }
     Text& decimal(std::uint64_t numerator, std::uint64_t denominator) noexcept
     {
         const auto hundredths = (numerator * 100U + denominator / 2U) / denominator;
-        number(hundredths / 100U);
+        number(static_cast<std::uint32_t>(hundredths / 100U));
         const auto fraction = hundredths % 100U;
         if (fraction != 0U) {
             add("."); const char digits[]{static_cast<char>('0' + fraction / 10U),
@@ -86,7 +189,7 @@ void voltage(Text& text, std::int64_t microvolts) noexcept
     if (microvolts < 0) { text.add("-"); }
     if (magnitude >= 1000000U) { text.decimal(magnitude, 1000000U).add("V"); }
     else if (magnitude >= 1000U) { text.decimal(magnitude, 1000U).add("mV"); }
-    else { text.number(magnitude).add("uV"); }
+    else { text.number(static_cast<std::uint32_t>(magnitude)).add("uV"); }
 }
 void timebase(Text& text, std::uint32_t microseconds) noexcept
 {
@@ -105,28 +208,12 @@ const char* coupling_name(InputCoupling coupling) noexcept
 }
 const char* storage_action_name(StorageAction action) noexcept
 {
-    switch (action) {
-    case StorageAction::SaveWaveform: return "SAVE WAVE";
-    case StorageAction::RecallWaveform: return "RECALL WAVE";
-    case StorageAction::SaveSettings: return "SAVE CONFIG";
-    case StorageAction::RestoreSettings: return "LOAD CONFIG";
-    case StorageAction::SaveCalibration: return "SAVE CAL";
-    default: return "RESTORE CAL";
-    }
+    return compact_label(StorageActionPool, StorageActionOffsets, static_cast<std::size_t>(action), 5U);
 }
 const char* storage_status_name(UiStorageStatus status) noexcept
 {
-    switch (status) {
-    case UiStorageStatus::Disabled: return "DISABLED";
-    case UiStorageStatus::Saved: return "SAVED";
-    case UiStorageStatus::Recalled: return "RECALLED";
-    case UiStorageStatus::Restored: return "RESTORED";
-    case UiStorageStatus::Empty: return "EMPTY";
-    case UiStorageStatus::Error: return "ERROR";
-    case UiStorageStatus::ReadOnly: return "READ ONLY";
-    case UiStorageStatus::HoldRequired: return "HOLD TO SAVE";
-    default: return "READY";
-    }
+    const auto index = static_cast<std::size_t>(status);
+    return StorageStatusPool + StorageStatusOffsets[index < sizeof(StorageStatusOffsets) ? index : 1U];
 }
 const char* calibration_action_name(CalibrationAction action) noexcept
 {
@@ -152,16 +239,7 @@ bool same_physical(const PhysicalSettings& a, const PhysicalSettings& b) noexcep
 }
 const char* frequency_state(FrequencyStatus status) noexcept
 {
-    switch (status) {
-    case FrequencyStatus::Valid: return "OK";
-    case FrequencyStatus::LowAmplitude: return "LOW";
-    case FrequencyStatus::InsufficientCycles: return "CYCLES";
-    case FrequencyStatus::TooFast: return "FAST";
-    case FrequencyStatus::Unstable: return "UNSTABLE";
-    case FrequencyStatus::Clipped: return "CLIP";
-    case FrequencyStatus::Grounded: return "GND";
-    default: return "RES";
-    }
+    return compact_label(FrequencyStatePool, FrequencyStateOffsets, static_cast<std::size_t>(status), 7U);
 }
 void microhertz(Text& text, std::uint64_t value) noexcept;
 void frequency(Text& text, const MeasurementResult& result) noexcept
@@ -174,32 +252,21 @@ void microhertz(Text& text, std::uint64_t value) noexcept
     if (value >= 1000000000000ULL) { text.decimal(value, 1000000000000ULL).add("MHz"); }
     else if (value >= 1000000U) { text.decimal(value, 1000000U).add("Hz"); }
     else if (value >= 1000U) { text.decimal(value, 1000U).add("mHz"); }
-    else { text.number(value).add("uHz"); }
+    else { text.number(static_cast<std::uint32_t>(value)).add("uHz"); }
 }
 const char* calibration_stage(CalibrationSessionState state) noexcept
 {
-    switch (state) {
-    case CalibrationSessionState::FirstReference: return "POINT 1";
-    case CalibrationSessionState::SecondReference: return "POINT 2";
-    case CalibrationSessionState::ValidationReference: return "CHECK 3";
-    case CalibrationSessionState::Verified: return "VERIFIED";
-    case CalibrationSessionState::Installed: return "INSTALLED";
-    case CalibrationSessionState::Aborted: return "ABORTED";
-    case CalibrationSessionState::Failed: return "FAILED";
-    default: return "IDLE";
-    }
+    return compact_label(CalibrationStagePool, CalibrationStageOffsets, static_cast<std::size_t>(state), 0U);
+}
+const char* calibration_failure(CalibrationStatus status_value) noexcept
+{
+    const auto status = static_cast<std::size_t>(status_value);
+    const auto index = status >= 5U && status <= 10U ? status - 5U : 6U;
+    return compact_label(CalibrationFailurePool, CalibrationFailureOffsets, index, 6U);
 }
 const char* calibration_failure(const CalibrationSession& session) noexcept
 {
-    switch (session.fit_status()) {
-    case CalibrationStatus::StaleEpoch: return "Need new reference";
-    case CalibrationStatus::InsufficientSpan: return "Refs too close";
-    case CalibrationStatus::InvalidSlope: return "Bad slope";
-    case CalibrationStatus::Unrepresentable: return "Cal out of range";
-    case CalibrationStatus::FitResidual: return "Rounding failed";
-    case CalibrationStatus::ValidationFailed: return "Check 3 failed; BEGIN";
-    default: return "Check DC/session/refs";
-    }
+    return calibration_failure(session.fit_status());
 }
 }
 
