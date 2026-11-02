@@ -10,7 +10,7 @@ The firmware uses C++17, static allocation and a foreground event loop. It has n
 
 `dso_stm32_acquisition.cpp` configures ADC1, TIM2 and DMA1 Channel 1 for waveform sampling. Capture planning and trigger behavior live in `dso_capture.cpp` and `dso_acquisition.cpp`; the DMA ring and record ownership are handled by `dso_dma_ring.cpp`. Completed records are published as immutable captures for UI processing. Held captures preserve their data while settings or later acquisitions change.
 
-`dso_ui_controller.cpp` connects front-panel state, trigger/capture state, measurements and rendering. Slow timebases use rolling acquisition and FIR decimation (`dso_rolling.cpp`, `dso_decimator.cpp`). LCD updates use the ILI9341 display path; `dso_stm32_lcd_dma.cpp` owns the bounded DMA transport used by the display renderer.
+`dso_ui_controller.cpp` connects front-panel state, trigger/capture state, measurements and rendering. The current timebase catalogue has 18 triggered settings from 10 µs/div through 5 s/div; it does not include the former slow rolling and filtered acquisition path. LCD updates use the ILI9341 display path; `dso_stm32_lcd_dma.cpp` owns the bounded DMA transport used by the display renderer.
 
 ## Peripheral ownership
 
@@ -28,13 +28,15 @@ The firmware uses C++17, static allocation and a foreground event loop. It has n
 
 The trigger activity LED is initialized only after the board passes its UID-guarded activation. The platform has already released JTAG while retaining SWD; PA15 is then configured as a 2 MHz push-pull output after preloading the inactive HIGH level and changing only its GPIO configuration field. D3 is wired through R28 (470 Ω) to +3.3 V, so driving PA15 LOW lights it. A single foreground, nonblocking 100 ms pulse is restarted by accepted trigger events. Each acquisition engine owns a pending-event flag, preserved through rearm until the application consumes both flags; no interrupt accesses this state. Multiple unseen edges coalesce into one indication. It does not depend on display refresh. See [Trigger LED behavior](trigger-led.md) for mode details and limits.
 
-The LED indicates accepted software trigger events, not an electrical trigger strobe or timing measurement. Fast actual edges can be indicated in eligible Auto, Normal, and Single captures. Accepted Normal/Single edges on slow timebases can also light the LED before the processed post-trigger record is ready. Auto free-run timeouts, recall/HOLD redraws, slow Auto rolling updates, and crossings rejected before sufficient pre-trigger history do not create an LED pulse. The pulse remains active through Single's automatic HOLD and is forced inactive on startup/application faults; the HardFault/NMI entry path also drives PA15 inactive. Closely spaced accepted edges can make the LED appear continuously lit. This software behavior has not yet been verified on flashed hardware.
+The LED indicates accepted software trigger events, not an electrical trigger strobe or timing measurement. Accepted edges can be indicated in eligible Auto, Normal, and Single captures. Auto free-run timeouts, recall/HOLD redraws, and crossings rejected before sufficient pre-trigger history do not create an LED pulse. The pulse remains active through Single's automatic HOLD and is forced inactive on startup/application faults; the HardFault/NMI entry path also drives PA15 inactive. Closely spaced accepted edges can make the LED appear continuously lit. This software behavior has not yet been verified on flashed hardware.
 
 ## Memory and storage
 
 The unreleased linker layout provides 62 KiB for the application and reserves the final 2 KiB of Flash (0x0800F800–0x0800FFFF) for one storage bank. The target has 20 KiB SRAM; the linker reserves a 2 KiB stack region. The storage layer and board-specific Flash adapter are in `dso_storage.cpp` and `dso_stm32_storage.cpp`.
 
 Before erasing the only bank, the storage service stages the complete outgoing payload in owned RAM using bounded work steps. This permits settings/calibration saves to preserve a waveform sourced from that same bank. Once erase begins, power loss may destroy the previous saved data. CRC, readback and final commit validation still prevent incomplete records from being accepted. This intentionally replaces the previous two-bank power-loss protection. The previous lower bank becomes application space; only the previous upper bank remains at a storage address, so migration of the latest old record is not guaranteed.
+
+Record schemas 1–4 remain supported when their saved settings and waveform metadata are valid for this firmware. A record that names a removed timebase index is rejected rather than remapped to a different timebase. Opening such a known-schema record does not write or erase Flash; an explicit save can replace it with a supported record. The legacy `Filtered25` sample-processing enum value remains reserved for decoding/validation and does not restore the removed filtered acquisition path.
 
 ## Status and limits
 

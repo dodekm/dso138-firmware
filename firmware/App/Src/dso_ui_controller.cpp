@@ -163,10 +163,14 @@ const char* frequency_state(FrequencyStatus status) noexcept
     default: return "RES";
     }
 }
+void microhertz(Text& text, std::uint64_t value) noexcept;
 void frequency(Text& text, const MeasurementResult& result) noexcept
 {
     if (result.frequency_status != FrequencyStatus::Valid) { text.add("-- ").add(frequency_state(result.frequency_status)); return; }
-    const auto value = result.frequency_microhertz;
+    microhertz(text, result.frequency_microhertz);
+}
+void microhertz(Text& text, std::uint64_t value) noexcept
+{
     if (value >= 1000000000000ULL) { text.decimal(value, 1000000000000ULL).add("MHz"); }
     else if (value >= 1000000U) { text.decimal(value, 1000000U).add("Hz"); }
     else if (value >= 1000U) { text.decimal(value, 1000U).add("mHz"); }
@@ -223,14 +227,12 @@ void ScopeController::refresh_backend() noexcept
         config_.acquisition_input.set(true);
         planned_index_ = ui_.settings().timebase_index;
         if (!plan_scope_timebase(planned_index_, plan_)) { plan_.support = ScopeTimebaseSupport::Invalid; }
-        if (plan_.support == ScopeTimebaseSupport::NeedsSlowBackend && config_.rolling != nullptr &&
-            plan_rolling_timebase(planned_index_, plan_.timing)) { plan_.support = ScopeTimebaseSupport::Rolling; }
         config_.acquisition_input.set(false);
     }
     const bool boot_storage = storage_status_ != UiStorageStatus::Disabled &&
         (storage_boot_pending_ || storage_boot_active_ || storage_boot_waiting_input_);
     ui_.set_capture_inhibited(boot_storage || !config_.acquisition_enabled ||
-        (plan_.support != ScopeTimebaseSupport::CircularDma && plan_.support != ScopeTimebaseSupport::Rolling));
+        plan_.support != ScopeTimebaseSupport::CircularDma);
 }
 
 void ScopeController::panel_update(const PanelUpdate& update, std::uint32_t now_ms) noexcept
@@ -239,7 +241,6 @@ void ScopeController::panel_update(const PanelUpdate& update, std::uint32_t now_
     if (storage_busy() && config_.storage_input.pause != nullptr) { return; }
     calibration_session_.physical_update(update);
     acquisition_.physical_update(update);
-    if (config_.rolling != nullptr) { config_.rolling->physical_update(update); }
     ui_.physical_update(update);
     buttons(update.buttons, now_ms);
     if (storage_boot_waiting_input_ && update.ready && update.buttons.held == 0U &&
@@ -268,8 +269,7 @@ bool ScopeController::sample(std::uint16_t index, std::uint16_t& out) const noex
 
 bool ScopeController::acquisition_running() const noexcept
 {
-    return acquisition_.state() == AcquisitionState::Running ||
-        (config_.rolling != nullptr && config_.rolling->state() == RollingState::Running);
+    return acquisition_.state() == AcquisitionState::Running;
 }
 
 const MeasurementResult* ScopeController::measurements() const noexcept
@@ -282,9 +282,7 @@ bool ScopeController::calibration_point(std::int64_t reference_microvolts, Calib
 {
     const auto* result = measurements();
     if (frame_recalled_ || storage_busy() || result == nullptr || work_ != UiWork::Idle || ui_.wants_run() || ui_.state() != UiRunState::Hold ||
-        acquisition_running() || pending_consumption_ ||
-        (active_slow_ ? config_.rolling == nullptr || config_.rolling->state() != RollingState::Stopped :
-                        acquisition_.state() != AcquisitionState::Stopped) ||
+        acquisition_running() || pending_consumption_ || acquisition_.state() != AcquisitionState::Stopped ||
         !ui_.physical_ready() || !same_physical(frame_.physical, ui_.physical()) ||
         frame_.physical.coupling != InputCoupling::Dc || result->adc_clipped) { return false; }
     const CalibrationPoint candidate{frame_.physical, frame_.acquisition_epoch, result->mean_code_q16,
@@ -299,13 +297,17 @@ void ScopeController::cancel_consumers() noexcept
 {
     screen_.cancel();
     projector_.cancel();
+    spectrum_.cancel();
+    if (spectrum_workspace_leased_) {
+        acquisition_.end_spectrum_workspace();
+        spectrum_workspace_leased_ = false;
+    }
     work_ = UiWork::Idle;
 }
 
 void ScopeController::publish_fault(UiControllerFault reason) noexcept
 {
     fault_ = reason;
-    rolling_hold_pending_ = false;
     projection_.available = false;
     ui_.on_presentation_fault();
 }
@@ -318,24 +320,9 @@ bool ScopeController::cancel_acquisition() noexcept
     if (measurement_.state() == MeasurementState::Statistics || measurement_.state() == MeasurementState::Frequency) {
         measurement_.cancel();
     }
-    bool failed_running_stop{};
-    if (!active_slow_) {
-        failed_running_stop = acquisition_.stop() == AcquisitionStopResult::Failed;
-        static_cast<void>(acquisition_.release());
-    }
-    rolling_hold_pending_ = false;
-    slow_status_pending_ = false;
-    if (active_slow_ && config_.rolling != nullptr) {
-        const bool was_live = config_.rolling->state() == RollingState::Running &&
-            ui_.state() == UiRunState::Hold && !ui_.wants_run();
-        failed_running_stop = config_.rolling->stop() == AcquisitionStopResult::Failed;
-        static_cast<void>(config_.rolling->release());
-        RollingSnapshot held{};
-        rolling_hold_pending_ = was_live && config_.rolling->snapshot(held) && held.capture.mode == TriggerMode::Auto;
-    }
+    const bool failed_running_stop = acquisition_.stop() == AcquisitionStopResult::Failed;
+    static_cast<void>(acquisition_.release());
     pending_consumption_ = false;
-    pending_slow_release_ = false;
-    copying_slow_ = false;
     active_request_ = 0U;
     if (failed_running_stop) {
         // A cancellation can be requested after the UI has already transitioned
@@ -364,14 +351,11 @@ void ScopeController::fail(UiControllerFault reason) noexcept
 
 void ScopeController::arm(std::uint32_t request) noexcept
 {
-    if (!config_.acquisition_enabled ||
-        (plan_.support != ScopeTimebaseSupport::CircularDma && plan_.support != ScopeTimebaseSupport::Rolling) ||
+    if (!config_.acquisition_enabled || plan_.support != ScopeTimebaseSupport::CircularDma ||
         ui_.physical().microvolts_per_div < 10000U || ui_.physical().microvolts_per_div > 5000000U) {
         fail(UiControllerFault::Configuration); return;
     }
     if (!cancel_acquisition()) { return; }
-    rolling_hold_pending_ = false;
-    active_slow_ = plan_.support == ScopeTimebaseSupport::Rolling;
     const auto& settings = ui_.settings();
     // A measured fit in the board-bound RAM bank always takes precedence. The
     // callback fills a missing profile; only without a bank may it supply a
@@ -388,23 +372,11 @@ void ScopeController::arm(std::uint32_t request) noexcept
     if (active_calibration_.kind != CalibrationKind::Unavailable && !calibration_valid(active_calibration_)) {
         fail(UiControllerFault::Configuration); return;
     }
-    const auto capacity = active_slow_ ? RollingCapacity : CaptureCapacity;
+    const auto capacity = CaptureCapacity;
     const auto pretrigger = static_cast<std::uint16_t>(std::uint32_t{settings.trigger_position_permille} * (capacity - 1U) / 1000U);
     auto hysteresis = static_cast<std::uint16_t>(8U);
     if (hysteresis > settings.trigger_level_code) { hysteresis = settings.trigger_level_code; }
     if (hysteresis > AdcMax - settings.trigger_level_code) { hysteresis = static_cast<std::uint16_t>(AdcMax - settings.trigger_level_code); }
-    if (active_slow_) {
-        active_request_ = request;
-        config_.acquisition_input.set(true);
-        const bool started = config_.rolling != nullptr && config_.rolling->start(RollingRequest{ui_.physical(), plan_.timing, request,
-                20U, 3U, 2U, {RollingCapacity, pretrigger, settings.trigger_level_code, hysteresis,
-                             settings.mode, settings.edge, 0U}, config_.slow_processing});
-        config_.acquisition_input.set(false);
-        if (!started || !ui_.on_capture_started(request)) {
-            fail(UiControllerFault::Acquisition);
-        }
-        return;
-    }
     // At least pretrigger+1 samples, or 50ms nominal Auto wait, whichever is
     // longer. Deadline is in sample events and cannot overflow at 500kS/s.
     const auto divider = plan_.timing.divider;
@@ -453,83 +425,57 @@ void ScopeController::begin_copy() noexcept
     frozen_calibration_ = active_calibration_;
     frame_request_ = active_request_;
     pending_consumption_ = true;
-    pending_slow_release_ = false;
-    copying_slow_ = false;
-    frame_rolling_ = false;
+    frame_legacy_rolling_ = false;
+    frame_legacy_rolling_revision_ = 0U;
     frame_recalled_ = false;
-    copied_ = 0U;
-    work_ = UiWork::Copying;
-}
-
-void ScopeController::begin_rolling_copy(const RollingSnapshot& snapshot, bool ready) noexcept
-{
-    if (config_.rolling == nullptr || snapshot.count == 0U || snapshot.count > RollingCapacity ||
-        (ready && !ui_.on_frame_ready(active_request_))) { fail(UiControllerFault::Copy); return; }
-    cancel_consumers();
-    measurement_.cancel();
-    frame_valid_ = false;
-    rolling_snapshot_ = snapshot;
-    slow_status_pending_ = false;
-    frame_.physical = snapshot.physical; frame_.timing = snapshot.timing;
-    frame_.capture = snapshot.capture; frame_.acquisition_epoch = snapshot.epoch;
-    frame_.trigger_sequence = snapshot.trigger_sequence; frame_.edge_triggered = snapshot.edge_triggered;
-    frame_.processing = {snapshot.processing, snapshot.source_clipped, snapshot.output_clamped};
-    frozen_calibration_ = active_calibration_;
-    frame_request_ = active_request_;
-    frame_rolling_ = snapshot.capture.mode == TriggerMode::Auto;
-    frame_recalled_ = false;
-    pending_consumption_ = ready;
-    pending_slow_release_ = ready;
-    copying_slow_ = true;
-    rolling_hold_pending_ = false;
     copied_ = 0U;
     work_ = UiWork::Copying;
 }
 
 void ScopeController::poll_acquisition() noexcept
 {
-    if (!active_slow_) { acquisition_.poll(); }
-    else if (config_.rolling != nullptr) {
-        const bool warming = config_.rolling->revision() == 0U;
-        config_.rolling->poll();
-        if (warming && config_.slow_processing == RollingProcessing::Filtered25 &&
-            config_.rolling->revision() != 0U && ui_.settings().mode != TriggerMode::Auto) {
-            slow_status_pending_ = true;
-        }
-    }
-    if (ui_.state() == UiRunState::Acquiring &&
-        ((!active_slow_ && acquisition_.state() == AcquisitionState::Fault) ||
-         (active_slow_ && config_.rolling != nullptr && config_.rolling->state() == RollingState::Fault))) {
+    acquisition_.poll();
+    if (ui_.state() == UiRunState::Acquiring && acquisition_.state() == AcquisitionState::Fault) {
         fail(UiControllerFault::Acquisition); return;
     }
-    if (!active_slow_) {
-        if (acquisition_.state() == AcquisitionState::Ready && !pending_consumption_) { begin_copy(); }
-        return;
-    }
-    if (config_.rolling == nullptr) { return; }
-    const bool ready = config_.rolling->state() == RollingState::Ready;
-    if (ready && pending_consumption_) { return; }
-    // Live point arrivals only queue a newer window. Never restart an in-flight
-    // copy/reduction/render, even when it takes longer than one sample period.
-    if (!ready && !rolling_hold_pending_ && work_ != UiWork::Idle) { return; }
-    RollingSnapshot snapshot{};
-    if ((ready || rolling_hold_pending_ || config_.rolling->state() == RollingState::Running) &&
-        config_.rolling->snapshot(snapshot) &&
-        (ready || rolling_hold_pending_ || snapshot.session != rolling_snapshot_.session || snapshot.revision != rolling_snapshot_.revision)) {
-        begin_rolling_copy(snapshot, ready);
-    }
-    if (slow_status_pending_ && work_ == UiWork::Idle) {
-        slow_status_pending_ = false;
-        redraw();
-    }
+    if (acquisition_.state() == AcquisitionState::Ready && !pending_consumption_) { begin_copy(); }
 }
 
 ProjectionSettings ScopeController::view() const noexcept
 {
     const auto& settings = ui_.settings();
     return {scope_timebase_us(settings.timebase_index), ScopePlotWidth, ScopePlotHeight,
-        ScopePixelsPerVerticalDiv, static_cast<std::uint16_t>(frame_rolling_ ? 999U : settings.trigger_position_permille),
+        ScopePixelsPerVerticalDiv, settings.trigger_position_permille,
         settings.vertical_offset_pixels, settings.horizontal_offset_samples};
+}
+
+void ScopeController::begin_spectrum() noexcept
+{
+    projection_.available = false;
+    if (!frame_valid_ || frame_.capture.length < SpectrumLength ||
+        frame_.timing.timer_hz == 0U || frame_.timing.divider == 0U ||
+        (frame_.processing.kind != SampleProcessingKind::Point &&
+         frame_.processing.kind != SampleProcessingKind::Filtered25) || acquisition_running()) {
+        work_ = UiWork::Idle;
+        present();
+        return;
+    }
+    const auto maximum_start = static_cast<std::uint16_t>(frame_.capture.length - SpectrumLength);
+    const auto centered = frame_.capture.pretrigger > SpectrumLength / 2U ?
+        static_cast<std::uint16_t>(frame_.capture.pretrigger - SpectrumLength / 2U) : std::uint16_t{0U};
+    const auto start = centered > maximum_start ? maximum_start : centered;
+    std::int32_t* workspace{};
+    if (!acquisition_.begin_spectrum_workspace(workspace)) { fail(UiControllerFault::Spectrum); return; }
+    spectrum_workspace_leased_ = true;
+    if (!spectrum_.begin(samples_.data(), frame_.capture.length, start, frame_, workspace,
+                         static_cast<std::uint16_t>(DmaRingSamples / 2U), projection_)) {
+        spectrum_.cancel();
+        acquisition_.end_spectrum_workspace();
+        spectrum_workspace_leased_ = false;
+        fail(UiControllerFault::Spectrum);
+        return;
+    }
+    work_ = UiWork::Spectrum;
 }
 
 void ScopeController::redraw() noexcept
@@ -550,6 +496,7 @@ void ScopeController::redraw() noexcept
             work_ = UiWork::Measuring;
             return;
         }
+        if (ui_.domain() == Domain::Spectrum) { begin_spectrum(); return; }
         if (!projector_.begin(samples_.data(), frame_.capture.length, frame_, frozen_calibration_, view(), projection_)) {
             fail(UiControllerFault::Projection); return;
         }
@@ -571,10 +518,9 @@ void ScopeController::finish_presentation() noexcept
     if (!pending_consumption_) { return; }
     // Screen is Complete (or disabled); the projection remains private. Release
     // the acquisition record only after all copy/projection consumers finish.
-    const bool released = pending_slow_release_ ? config_.rolling != nullptr && config_.rolling->release() : acquisition_.release();
+    const bool released = acquisition_.release();
     if (!released) { fail(UiControllerFault::Copy); return; }
     pending_consumption_ = false;
-    pending_slow_release_ = false;
     static_cast<void>(ui_.on_frame_consumed(frame_request_));
 }
 
@@ -594,9 +540,9 @@ bool ScopeController::stored_calibration(void* context, std::uint16_t offset, st
 bool ScopeController::staged_calibration(void* context, std::uint16_t offset, std::uint8_t* output, std::uint16_t count) noexcept
 {
     const auto& self = *static_cast<ScopeController*>(context);
-    if (!self.acquisition_.recall_staging_ || output == nullptr || offset > CalibrationSupportedRecordMaximum ||
+    if (self.acquisition_.workspace_owner_ != DmaAcquisition::WorkspaceOwner::Recall || output == nullptr || offset > CalibrationSupportedRecordMaximum ||
         count > CalibrationSupportedRecordMaximum - offset) { return false; }
-    const auto* bytes = reinterpret_cast<const std::uint8_t*>(self.acquisition_.dma_);
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(self.acquisition_.workspace_.dma.samples);
     for (std::uint16_t i{}; i < count; ++i) { output[i] = bytes[offset + i]; }
     return true;
 }
@@ -605,7 +551,7 @@ void ScopeController::finish_storage(UiStorageStatus status) noexcept
 {
     const bool boot = storage_boot_active_;
     storage_boot_active_ = false;
-    acquisition_.recall_staging_ = false;
+    acquisition_.end_recall_staging();
     storage_phase_ = StoragePhase::Idle;
     storage_command_ = StorageCommand::None;
     storage_status_ = status;
@@ -635,7 +581,6 @@ void ScopeController::start_storage(StorageCommand command) noexcept
     if ((!boot_open && (ui_.wants_run() || ui_.state() != UiRunState::Hold)) || acquisition_running() || pending_consumption_ ||
         (boot_open && (fault_ != UiControllerFault::None || ui_.state() == UiRunState::Fault || frame_valid_ || work_ != UiWork::Idle)) ||
         acquisition_.state() != AcquisitionState::Stopped ||
-        (config_.rolling != nullptr && config_.rolling->state() != RollingState::Stopped) ||
         work_ == UiWork::Copying || work_ == UiWork::Measuring ||
         (command == StorageCommand::SaveWaveform && (!frame_valid_ || measurements() == nullptr))) {
         if (boot_open) { finish_storage(UiStorageStatus::Error); }
@@ -666,7 +611,6 @@ void ScopeController::calibrate(const CalibrationRequest& request) noexcept
     }
     if (ui_.wants_run() || ui_.state() != UiRunState::Hold || acquisition_running() || pending_consumption_ ||
         acquisition_.state() != AcquisitionState::Stopped ||
-        (config_.rolling != nullptr && config_.rolling->state() != RollingState::Stopped) ||
         work_ == UiWork::Copying || work_ == UiWork::Measuring) {
         calibration_status_ = UiCalibrationStatus::HoldRequired; redraw(); return;
     }
@@ -713,7 +657,7 @@ void ScopeController::service_storage() noexcept
             }
             if (boot_bank && config_.calibration_bank->board_identity() != store.board_identity()) { finish_storage(UiStorageStatus::Error); return; }
             if (!store.selected_samples_crc_seed(recall_crc_, recall_expected_crc_)) { finish_storage(UiStorageStatus::Error); return; }
-            acquisition_.recall_staging_ = true;
+            if (!acquisition_.begin_recall_staging()) { finish_storage(UiStorageStatus::Error); return; }
             copied_ = 0U; storage_phase_ = StoragePhase::Reading; return;
         }
         if (!store.writable()) { finish_storage(UiStorageStatus::ReadOnly); return; }
@@ -729,12 +673,12 @@ void ScopeController::service_storage() noexcept
         if (storage_command_ == StorageCommand::SaveWaveform) {
             record.waveform_present = true; record.frame = frame_;
             record.calibration = frozen_calibration_;
-            record.rolling = frame_rolling_; record.rolling_revision = rolling_revision();
+            record.rolling = frame_legacy_rolling_; record.rolling_revision = frame_legacy_rolling_revision_;
             source = {this, held_sample};
         }
         if (storage_command_ == StorageCommand::SaveCalibration) {
-            acquisition_.recall_staging_ = true;
-            const auto count = config_.calibration_bank->export_record(reinterpret_cast<std::uint8_t*>(acquisition_.dma_), CalibrationSupportedRecordMaximum);
+            if (!acquisition_.begin_recall_staging()) { finish_storage(UiStorageStatus::Error); return; }
+            const auto count = config_.calibration_bank->export_record(reinterpret_cast<std::uint8_t*>(acquisition_.workspace_.dma.samples), CalibrationSupportedRecordMaximum);
             if (count == 0U) { finish_storage(UiStorageStatus::Error); return; }
             record.calibration_bytes = static_cast<std::uint16_t>(count);
             calibration_source = {this, staged_calibration};
@@ -750,10 +694,10 @@ void ScopeController::service_storage() noexcept
         for (unsigned i{}; i < 16U && copied_ < count; ++i) {
             std::uint16_t value{};
             if (!store.read_selected_sample(copied_, value)) { finish_storage(UiStorageStatus::Error); return; }
-            acquisition_.dma_[copied_] = value;
+            acquisition_.workspace_.dma.samples[copied_] = value;
             if (!store.selected_samples_packed()) { recall_crc_ = ScopeStorage::sample_crc(recall_crc_, value); }
             else if ((copied_ & 1U) != 0U) {
-                recall_crc_ = ScopeStorage::packed_sample_crc12(recall_crc_, acquisition_.dma_[copied_ - 1U], value, true);
+                recall_crc_ = ScopeStorage::packed_sample_crc12(recall_crc_, acquisition_.workspace_.dma.samples[copied_ - 1U], value, true);
             } else if (copied_ + 1U == count) {
                 recall_crc_ = ScopeStorage::packed_sample_crc12(recall_crc_, value, 0U, false);
             }
@@ -768,7 +712,7 @@ void ScopeController::service_storage() noexcept
         const auto count = static_cast<std::uint16_t>(remaining > 32U ? 32U : remaining);
         // A successful read fills the consumed bytes; failures return before use.
         std::uint8_t scratch[32];
-        auto* bytes = restore_bank ? reinterpret_cast<std::uint8_t*>(acquisition_.dma_) + copied_ : scratch;
+        auto* bytes = restore_bank ? reinterpret_cast<std::uint8_t*>(acquisition_.workspace_.dma.samples) + copied_ : scratch;
         if (count != 0U && !store.read_selected_calibration(copied_, bytes, count)) { finish_storage(UiStorageStatus::Error); return; }
         for (std::uint16_t i{}; i < count; i = static_cast<std::uint16_t>(i + 2U)) {
             recall_crc_ = ScopeStorage::sample_crc(recall_crc_, static_cast<std::uint16_t>(bytes[i] | (std::uint16_t{bytes[i + 1U]} << 8U)));
@@ -777,7 +721,7 @@ void ScopeController::service_storage() noexcept
         if (copied_ != record->calibration_bytes) { return; }
         if ((recall_crc_ ^ 0xffffffffU) != recall_expected_crc_) { finish_storage(UiStorageStatus::Error); return; }
         if (restore_bank) {
-            const auto* staged = reinterpret_cast<const std::uint8_t*>(acquisition_.dma_);
+            const auto* staged = reinterpret_cast<const std::uint8_t*>(acquisition_.workspace_.dma.samples);
             const bool boot = storage_command_ == StorageCommand::None;
             auto& bank = *config_.calibration_bank;
             if (!calibration_record_valid(staged, record->calibration_bytes, bank.board_identity()) ||
@@ -795,12 +739,12 @@ void ScopeController::service_storage() noexcept
         if (!ui_.restore_settings(record->settings)) { finish_storage(UiStorageStatus::Error); return; }
         measurement_.cancel(); projection_.available = false; frame_valid_ = false;
         frame_ = record->frame; frozen_calibration_ = record->calibration;
-        frame_rolling_ = record->rolling; rolling_snapshot_.revision = record->rolling_revision;
+        frame_legacy_rolling_ = record->rolling; frame_legacy_rolling_revision_ = record->rolling_revision;
         frame_recalled_ = true; copied_ = 0U; storage_phase_ = StoragePhase::Publishing; return;
     }
     if (storage_phase_ == StoragePhase::Publishing) {
         for (unsigned i{}; i < 64U && copied_ < frame_.capture.length; ++i) {
-            samples_[copied_] = acquisition_.dma_[copied_]; ++copied_;
+            samples_[copied_] = acquisition_.workspace_.dma.samples[copied_]; ++copied_;
         }
         if (copied_ == frame_.capture.length) { frame_valid_ = true; finish_storage(UiStorageStatus::Recalled); }
     }
@@ -848,14 +792,9 @@ UiServiceResult ScopeController::service() noexcept
     if (work_ == UiWork::Copying) {
         for (unsigned i{}; i < 64U && copied_ < frame_.capture.length; ++i) {
             std::uint16_t value{};
-            const bool read = copying_slow_ ? config_.rolling != nullptr && config_.rolling->read(rolling_snapshot_, copied_, value) :
-                acquisition_.read(copied_, value);
+            const bool read = acquisition_.read(copied_, value);
             if (!read) {
-                if (copying_slow_ && !pending_consumption_ && config_.rolling != nullptr && config_.rolling->state() != RollingState::Fault) {
-                    // A producer may outlive a snapshot lease. Retry latest; a
-                    // partial private copy is never marked available.
-                    cancel_consumers(); rolling_snapshot_ = RollingSnapshot{};
-                } else { fail(UiControllerFault::Copy); }
+                fail(UiControllerFault::Copy);
                 break;
             }
             samples_[copied_++] = value; ++result.copied;
@@ -869,6 +808,17 @@ UiServiceResult ScopeController::service() noexcept
         else if (result.measurement.state != MeasurementState::Statistics && result.measurement.state != MeasurementState::Frequency) {
             fail(UiControllerFault::Measurement);
         }
+    } else if (work_ == UiWork::Spectrum) {
+        const auto spectrum_state = spectrum_.step(8U);
+        if (spectrum_state == SpectrumState::Complete) {
+            if (spectrum_workspace_leased_) {
+                acquisition_.end_spectrum_workspace();
+                spectrum_workspace_leased_ = false;
+            }
+            work_ = UiWork::Idle;
+            present();
+        } else if (spectrum_state == SpectrumState::Invalid || spectrum_state == SpectrumState::Cancelled ||
+                   spectrum_state == SpectrumState::Idle) { fail(UiControllerFault::Spectrum); }
     } else if (work_ == UiWork::Projecting) {
         result.projection = projector_.step(8U, 8U);
         if (result.projection.state == ProjectionState::Complete) { present(); }
@@ -962,13 +912,43 @@ void ScopeController::format_scene() noexcept
         state == UiRunState::WaitingForBackend ? "WAIT BACK" : "ARM";
     if (state == UiRunState::Fault) { status = "FAULT"; }
     else if (frame_recalled_ && !ui_.wants_run()) { status = "RECALL HOLD"; }
-    else if (active_slow_ && config_.rolling != nullptr && config_.rolling->state() == RollingState::Running &&
-             state == UiRunState::Acquiring) {
-        status = config_.slow_processing == RollingProcessing::Filtered25 && config_.rolling->revision() == 0U ? "WARMUP" :
-            ui_.settings().mode == TriggerMode::Auto ? "ROLL" : "WAIT TRIG";
-    }
     Text{scene.status, &dirty_labels_, 1U, &screen_.text_ranges_[0U]}.add(status);
     const auto kind = frame_valid_ ? frozen_calibration_.kind : CalibrationKind::Unavailable;
+    const auto& settings = ui_.settings();
+    const bool spectrum = ui_.domain() == Domain::Spectrum;
+    if (spectrum) {
+        const auto* spectrum_result = spectrum_.result();
+        Text quality{scene.quality, &dirty_labels_, 2U, &screen_.text_ranges_[1U]};
+        quality.add(frame_recalled_ ? "REC" : spectrum_result != nullptr && spectrum_result->filtered_input ? "FIR" : "FFT");
+        Text{scene.channel, &dirty_labels_, 4U, &screen_.text_ranges_[2U]}.add("FFT 512 HANN AC");
+        Text{scene.timebase, &dirty_labels_, 8U, &screen_.text_ranges_[3U]}.add("dBFS ADC peak: 2048");
+        Text peak{scene.trigger, &dirty_labels_, 16U, &screen_.text_ranges_[4U]};
+        if (spectrum_result != nullptr && spectrum_result->available && spectrum_result->peak_available) {
+            peak.add("Pk "); microhertz(peak, spectrum_.peak_frequency_microhertz()); peak.add(" ");
+            const auto level = static_cast<std::int32_t>(spectrum_result->peak_dbfs_x100);
+            const auto magnitude = static_cast<std::uint32_t>(level < 0 ? -level : level);
+            if (level < 0) { peak.add("-"); }
+            peak.decimal(magnitude, 100U).add("dBFS");
+        } else { peak.add("Peak --"); }
+        if (spectrum_result != nullptr && spectrum_result->available) {
+            Text sampling{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]};
+            sampling.add("df "); microhertz(sampling, spectrum_result->bin_spacing_microhertz);
+            Text span{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]};
+            span.add("0.. "); microhertz(span, spectrum_result->nyquist_microhertz); span.add(" 10dB/div");
+            Text{scene.zero_label}.add("0dB");
+            scene.zero_y = static_cast<std::int16_t>(SpectrumPlotTop);
+        } else {
+            Text{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]}.add("df --");
+            Text record{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]};
+            if (!frame_valid_) { record.add("FFT NEEDS FROZEN FRAME"); }
+            else if (acquisition_running()) { record.add("FFT NEEDS HELD UNIFORM BLOCK"); }
+            else if (frame_.capture.length < SpectrumLength) { record.add("FFT NEEDS 512 SAMPLES"); }
+            else if (frame_.timing.timer_hz == 0U || frame_.timing.divider == 0U) { record.add("FFT TIMING UNKNOWN"); }
+            else { record.add("FFT UNAVAILABLE"); }
+            scene.zero_label[0] = '\0';
+        }
+        scene.trigger_y = -1; scene.trigger_x = -1;
+    } else {
     Text{scene.quality, &dirty_labels_, 2U, &screen_.text_ranges_[1U]}.add(kind == CalibrationKind::Measured ? "CAL" : kind == CalibrationKind::Nominal ? "NOM" : "RAW");
     const auto& physical = frame_valid_ ? frame_.physical : ui_.physical();
     Text channel{scene.channel, &dirty_labels_, 4U, &screen_.text_ranges_[2U]}; channel.add(coupling_name(physical.coupling)).add(" ");
@@ -976,20 +956,12 @@ void ScopeController::format_scene() noexcept
     if (physical.microvolts_per_div != 0U) { voltage(channel, physical.microvolts_per_div); channel.add("/div"); }
     else { channel.add("RANGE UNKNOWN"); }
     Text time{scene.timebase, &dirty_labels_, 8U, &screen_.text_ranges_[3U]}; timebase(time, scope_timebase_us(ui_.settings().timebase_index));
-    const auto& settings = ui_.settings();
     const auto mode = frame_valid_ ? frame_.capture.mode : settings.mode;
     const auto edge = frame_valid_ ? frame_.capture.edge : settings.edge;
     const auto level = frame_valid_ ? frame_.capture.level : settings.trigger_level_code;
-    Text trigger{scene.trigger, &dirty_labels_, 16U, &screen_.text_ranges_[4U]};
-    if (frame_valid_ && frame_rolling_) {
-        trigger.add(frame_.processing.kind == SampleProcessingKind::Filtered25 ? "AA25 ROLL " : "POINT ROLL ")
-            .number(frame_.capture.length).add("/512");
-    }
-    else {
-        trigger.add(mode_name(mode)).add(edge == TriggerEdge::Rising ? " R C" : " F C").number(level);
-        if (frame_valid_) { trigger.add(frame_.edge_triggered ? " TRIG" : " FREE"); }
-        if (frame_valid_ && frame_.processing.kind == SampleProcessingKind::Filtered25) { trigger.add(" AA25"); }
-    }
+    Text trigger{scene.trigger, &dirty_labels_, 16U, &screen_.text_ranges_[4U]}; trigger.add(mode_name(mode)).add(edge == TriggerEdge::Rising ? " R C" : " F C").number(level);
+    if (frame_valid_) { trigger.add(frame_.edge_triggered ? " TRIG" : " FREE"); }
+    if (frame_valid_ && frame_.processing.kind == SampleProcessingKind::Filtered25) { trigger.add(" AA25"); }
     if (frame_valid_) {
         Text sampling{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]};
         const auto divider = std::uint64_t{frame_.timing.divider};
@@ -1009,23 +981,22 @@ void ScopeController::format_scene() noexcept
             zero = ScopePlotHeight / 2 + settings.vertical_offset_pixels;
             if (zero >= 0 && zero < ScopePlotHeight) { scene.zero_y = static_cast<std::int16_t>(zero); }
         }
-        if (!frame_rolling_ && project_code_y(level, frame_, frozen_calibration_, viewport, threshold) && threshold >= 0 && threshold < ScopePlotHeight) {
+        if (project_code_y(level, frame_, frozen_calibration_, viewport, threshold) && threshold >= 0 && threshold < ScopePlotHeight) {
             scene.trigger_y = static_cast<std::int16_t>(threshold);
         }
         std::int64_t trigger_x{};
-        if (!frame_rolling_ && project_trigger_x(frame_, viewport, trigger_x) && trigger_x >= 0 && trigger_x <= ScopePlotWidth) {
+        if (project_trigger_x(frame_, viewport, trigger_x) && trigger_x >= 0 && trigger_x <= ScopePlotWidth) {
             scene.trigger_x = static_cast<std::int16_t>(trigger_x == ScopePlotWidth ? ScopePlotWidth - 1U : trigger_x);
         }
     } else { Text{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]}.add("NO RECORD"); Text{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]}.add("No record"); }
+    }
     Text focus{scene.focus, &dirty_labels_, 128U, &screen_.text_ranges_[7U]};
     switch (ui_.focus()) {
     case UiFocus::Timebase: focus.add("TIME "); timebase(focus, scope_timebase_us(settings.timebase_index)); scene.highlight = ScreenHighlight::Timebase; break;
     case UiFocus::TriggerMode: focus.add("NEXT MODE ").add(mode_name(settings.mode)); scene.highlight = ScreenHighlight::Trigger; break;
     case UiFocus::TriggerEdge: focus.add("NEXT EDGE ").add(settings.edge == TriggerEdge::Rising ? "RISING" : "FALLING"); scene.highlight = ScreenHighlight::Trigger; break;
     case UiFocus::TriggerLevel: focus.add("NEXT LEVEL CODE ").number(settings.trigger_level_code); scene.highlight = ScreenHighlight::Trigger; break;
-    case UiFocus::TriggerPosition:
-        focus.add(frame_rolling_ ? "NEXT TRIG POS " : "TRIG POS ").decimal(settings.trigger_position_permille, 10U).add("%");
-        if (frame_rolling_) { focus.add(" (ROLL right)"); }
+    case UiFocus::TriggerPosition: focus.add("TRIG POS ").decimal(settings.trigger_position_permille, 10U).add("%");
         scene.highlight = ScreenHighlight::Position; break;
     case UiFocus::VerticalPosition: focus.add("VERT ").signed_number(settings.vertical_offset_pixels).add("px"); scene.highlight = ScreenHighlight::Position; break;
     case UiFocus::HorizontalPosition: focus.add("PAN ").signed_number(settings.horizontal_offset_samples).add(" samples"); scene.highlight = ScreenHighlight::Position; break;
@@ -1049,6 +1020,9 @@ void ScopeController::format_scene() noexcept
     case UiFocus::Calibration:
         focus.add("CAL ").add(calibration_action_name(ui_.calibration_action()));
         focus.add("  ").add(calibration_stage(calibration_session_.state()));
+        break;
+    case UiFocus::Domain:
+        focus.add("DOMAIN ").add(ui_.domain() == Domain::Spectrum ? "SPECTRUM +/-" : "SCOPE +/-");
         break;
     default: break;
     }
@@ -1079,21 +1053,28 @@ void ScopeController::format_scene() noexcept
         else if (calibration_status_ == UiCalibrationStatus::ReferenceRequired) { hint = "HOLD fresh, steady, unclipped DC"; }
         else if (calibration_status_ == UiCalibrationStatus::Error) { hint = calibration_failure(calibration_session_); }
     }
+    else if (spectrum) {
+        const auto* spectrum_result = spectrum_.result();
+        const bool spectrum_filtered = spectrum_result != nullptr && spectrum_result->filtered_input;
+        scene.warning = spectrum_filtered || acquisition_running() ||
+            !frame_valid_ || frame_.capture.length < SpectrumLength ||
+            (frame_valid_ && (frame_.timing.timer_hz == 0U || frame_.timing.divider == 0U));
+        hint = spectrum_filtered ? "FIR filtered samples; amplitude response altered" :
+            acquisition_running() ? "HOLD for FFT" :
+            frame_recalled_ ? "FFT from saved uniform samples" :
+            !frame_valid_ ? "FFT needs a frozen uniform frame" :
+            frame_.capture.length < SpectrumLength ? "FFT needs at least 512 samples" :
+            (frame_.timing.timer_hz == 0U || frame_.timing.divider == 0U) ? "FFT timing is unknown" :
+            "0dBFS reference = 2048-code peak";
+    }
     else if (frame_recalled_) { hint = "RECALL saved range/cal"; scene.warning = true; }
-    else if (plan_.support != ScopeTimebaseSupport::CircularDma && plan_.support != ScopeTimebaseSupport::Rolling) { hint = "No slow capture; view only"; scene.warning = true; }
+    else if (plan_.support != ScopeTimebaseSupport::CircularDma) { hint = "Capture unavailable; view only"; scene.warning = true; }
     else if (!config_.acquisition_enabled) { hint = "Hardware disabled"; scene.warning = true; }
     else if (!ui_.physical_ready()) { hint = "Switches settling"; scene.warning = true; }
     else if (frame_valid_ && !same_physical(frame_.physical, ui_.physical())) { hint = "OLD range/coupling held"; scene.warning = true; }
     else if (measurements() != nullptr && measurements()->adc_clipped) { hint = "Clip/clamp: amp/freq invalid"; scene.warning = true; }
-    else if (active_slow_ && config_.rolling != nullptr && config_.rolling->state() == RollingState::Running &&
-             config_.slow_processing == RollingProcessing::Filtered25 && config_.rolling->revision() == 0U) {
-        hint = "AA25 warmup: first 14.92dt";
-    }
     else if (frame_valid_ && frame_.processing.kind == SampleProcessingKind::Filtered25) {
         hint = ui_.wants_run() ? "AA25 delay 7.44dt; alias risk; OK HOLD" : "AA25 delay 7.44dt; alias risk; OK RUN";
-    }
-    else if (frame_valid_ && frame_rolling_) {
-        hint = ui_.wants_run() ? "Point: alias risk; OK HOLD" : "Point mode: alias risk; OK RUN";
     }
     else if (measurements() != nullptr && measurements()->input_ac_coupled) { hint = "AC-coupled RMS/mean"; }
     else if (settings.measurement_view == MeasurementView::Frequency) { hint = "F clock nominal; alias risk"; }

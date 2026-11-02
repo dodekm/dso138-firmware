@@ -14,11 +14,11 @@ Import `firmware/` as an existing STM32CubeIDE project and select **Release**. U
 
 ## Unexpected waveform
 
-Check probe and ground connections, input coupling and sensitivity switches, trigger mode and trigger level. Auto triggering is useful for changing signals; Normal triggering is useful for repetitive signals; Single waits for one qualifying trigger. Confirm the signal is within the instrument's safe input range. Slow timebases use filtered rolling acquisition, so their screen behavior differs from a fast triggered capture.
+Check probe and ground connections, input coupling and sensitivity switches, trigger mode and trigger level. Auto triggering is useful for changing signals; Normal triggering is useful for repetitive signals; Single waits for one qualifying trigger. Confirm the signal is within the instrument's safe input range. The current firmware supports 18 triggered timebases from 10 µs/div through 5 s/div.
 
 ## Trigger LED stays off or appears continuously lit
 
-D3 is an activity cue for accepted trigger crossings. It stays off when there is no newly accepted edge, during Auto free-run timeout, recall/HOLD redraw, slow Auto rolling updates, or a startup/application fault. On slow Normal or Single timebases, it may light when an edge is accepted well before the processed record is ready. Closely spaced crossings can keep it apparently lit without a visible gap. See [Trigger LED behavior](trigger-led.md). This feature has not been tested on flashed hardware, and its pulse is not a precise trigger timing reference.
+D3 is an activity cue for accepted trigger crossings. It stays off when there is no newly accepted edge, during Auto free-run timeout, recall/HOLD redraw, or a startup/application fault. Closely spaced crossings can keep it apparently lit without a visible gap. See [Trigger LED behavior](trigger-led.md). This feature has not been tested on flashed hardware, and its pulse is not a precise trigger timing reference.
 
 ## Unexpected readings or saved records
 

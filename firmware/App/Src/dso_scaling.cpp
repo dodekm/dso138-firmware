@@ -7,15 +7,14 @@ namespace dso {
 namespace {
 constexpr std::uint32_t Timebases[ScopeTimebaseCount]{
     10U,20U,50U,100U,200U,500U,1000U,2000U,5000U,10000U,20000U,50000U,
-    100000U,200000U,500000U,1000000U,2000000U,5000000U,
-    10000000U,20000000U,50000000U,100000000U,200000000U,500000000U
+    100000U,200000U,500000U,1000000U,2000000U,5000000U
 };
 constexpr std::uint32_t catalogue_timebase(std::uint8_t index) noexcept
 {
     if (index >= ScopeTimebaseCount) { return 0U; }
     const auto part = index % 3U;
     auto value = part == 0U ? 10U : part == 1U ? 20U : 50U;
-    // At most seven decades; the largest result is 500,000,000 us/div.
+    // At most five decades; the largest result is 5,000,000 us/div.
     for (auto decade = static_cast<unsigned>(index / 3U); decade != 0U; --decade) { value *= 10U; }
     return value;
 }
@@ -30,7 +29,7 @@ constexpr bool timebase_catalogue_matches() noexcept
 }
 static_assert(timebase_catalogue_matches(),
               "Regenerate timer presets when the timebase catalogue changes");
-static_assert(ScopeTimebaseCount == 24U && DmaHalfSamples == 512U &&
+static_assert(ScopeTimebaseCount == 18U && DmaHalfSamples == 512U &&
               sizeof(detail::ScopePresets)/sizeof(detail::ScopePresets[0]) == ScopeTimebaseCount,
               "Timer presets require the current fixed capture profile");
 constexpr std::int32_t MaximumZero{4095 * 65536};
@@ -140,9 +139,9 @@ bool plan_scope_timebase(std::uint8_t index, ScopeTimebasePlan& out) noexcept
     // tie rule. The catalogue comparison above rejects stale generated data.
     const auto pair = detail::ScopePresets[index];
     const auto divider = (std::uint32_t{pair.prescaler}+1U) * (std::uint32_t{pair.period}+1U);
-    const auto support = std::uint64_t{divider} * DmaHalfSamples < std::uint64_t{0x80000000U} ?
-        ScopeTimebaseSupport::CircularDma : ScopeTimebaseSupport::NeedsSlowBackend;
-    out = ScopeTimebasePlan{{pair.prescaler,pair.period,72000000U,divider,12000000U,46U},support};
+    if (std::uint64_t{divider} * DmaHalfSamples >= std::uint64_t{0x80000000U}) { return false; }
+    out = ScopeTimebasePlan{{pair.prescaler,pair.period,72000000U,divider,12000000U,46U},
+                            ScopeTimebaseSupport::CircularDma};
     return true;
 }
 

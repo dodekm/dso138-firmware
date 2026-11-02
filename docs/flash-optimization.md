@@ -293,3 +293,28 @@ The investigation covered the major linked contributors and the specific smaller
 The accepted 60,488-byte configured ELF was programmed through the owner-selected ST-Link at 50 kHz SWD after matching the MCU identity and 64 KiB device capacity. All 158 release source/dependency files matched the tested configured tree, apart from the private board-identity header. CubeProgrammer erased application pages 0–59 and reported successful download verification; the final 2 KiB storage pages were left untouched. No Flash backup was taken, as requested.
 
 After a separate software reset/run, non-resetting HOTPLUG reads confirmed startup stage 6, LCD ID 0x9341, running application phase and zero startup/power/display/application fault fields. The observed acquisition publication contained no captured frames or qualified physical generation, so this limited startup check is not an acquisition, waveform or performance qualification. Normal-mode reconnects disturbed startup and were replaced by HOTPLUG observation. Earlier statements about the board remaining on cab7e80 describe the preceding offline investigation.
+
+## Basic FFT and user-authorized slow-backend removal — 2026-11-02
+
+The user narrowed the spectrum extension to basic functionality, removed its clipping warnings, authorized removing the 10-500 s/div rolling/filter backend, and then requested a compact peak detector. The current source retains the other scope features and saved-record format. The custom real FFT uses integer arithmetic and the stopped DMA workspace, with no imported FFT implementation, dynamic allocation or runtime trigonometry.
+
+The following are forced configured whole-image measurements with the same GNU Arm 14.3 Release profile, board identity, 62 KiB application region and 2 KiB storage reservation. Load spans include initialized RAM's Flash image and alignment.
+
+| Build step | Load span | Application headroom | Change |
+| --- | ---: | ---: | ---: |
+| Basic FFT before removing slow rolling/filtering | 65,120 B | 1,632 B over limit | Unflashable analysis build |
+| Slow backend and six timebases removed | 59,544 B | 3,944 B | 5,576 B Flash saved |
+| Compact dominant-bin detector and readout | 59,824 B | 3,664 B | 280 B added |
+| Shared Scope/Spectrum focus and action formatting | 59,712 B | 3,776 B | 112 B recovered |
+
+Removal alone reduced BSS from 16,316 to 14,460 bytes, saving 1,856 RAM bytes. Peak ranking adds eight bytes, leaving final BSS at 14,468. Initialized data remains 112 bytes and heap remains zero. With 2,052 bytes of reserved stack/alignment, 3,848 bytes of SRAM remain unallocated. Relative to the pre-FFT 60,488-byte image, the current image is 776 bytes smaller while including basic FFT and peak reporting.
+
+The numeric path was reduced structurally: complex pairs are scaled together to form 31-bit powers, CLZ and a 34-byte logarithm table replace iterative wide-power processing, and bins are projected directly without a stored power array. The peak scan reuses that already-calculated logarithmic rank, excludes DC, accounts for the Nyquist endpoint and chooses the lower bin on an exact rank tie. It adds no transform, pass, coefficient table or result-buffer allocation; the result structure remains 24 bytes. There is no sub-bin interpolation or claim of extra resolution. Quantized-Hann coherent gain and one-sided peak normalization are documented in the spectrum engineering record.
+
+Shared focus formatting also fixes a usability problem: Spectrum now shows the actual selected Timebase, Trigger, Storage or Calibration field and action instead of allowing hidden edits behind a generic footer. Native controller and storage tests cover Spectrum Save/Recall, HOLD, cancellation/rearm and unchanged raw samples. Preset tests prove the original first 18 timer pairs remain unchanged and reject indices 18-255 without changing the supplied output. Older records using removed indices are rejected without automatic Flash writes; an explicit supported save can replace them.
+
+Fresh STM32CubeIDE imports build Release and Debug with all 39 current C++ sources discovered, the new FFT/spectrum modules included, the deleted rolling/decimator modules absent, and the non-LTO Capture override retained. Both reproduce the 59,712-byte load span, ending at 0x0800E940. Application C++ compilation retains strict warnings as errors; generated make peer-target warnings concern the LTO .su/.cyclo sidecars.
+
+An exact-image call-graph rebuild adds analysis metadata but produces the identical 59,712-byte runtime binary (SHA-256 8DBEDCF006713668EB3D785EBCFE0EEEFE251E9AD10D83B65ED47CE7F804CCBD). Its maximum callback-expanded foreground path is 1,348 bytes. All 46 reachable indirect sites are bound to the configured callbacks, with no unresolved reachable sites or recursion. A conservative 212-byte IRQ/software/hardware-frame allowance gives a 1,560-byte bound. Against the actual 2,048-byte minimum stack this leaves 488 bytes; the four alignment bytes are not usable stack.
+
+The LaTeX/PDF manual is revision 1.3, with 12 rendered A4 pages reviewed. Simulated images come from the real controller, renderer and LCD/GRAM command path with synthetic inputs; they are not physical captures. No FFT image has been flashed or timed. CubeProgrammer currently reports no ST-Link, so hardware qualification remains pending. Earlier physical observations in this report apply to their named older images.

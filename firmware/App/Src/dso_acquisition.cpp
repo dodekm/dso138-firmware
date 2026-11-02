@@ -30,6 +30,40 @@ bool DmaAcquisition::valid_port() const noexcept
         port_.observe != nullptr && port_.acknowledge != nullptr;
 }
 
+bool DmaAcquisition::begin_spectrum_workspace(std::int32_t*& words) noexcept
+{
+    words = nullptr;
+    if ((state_ != AcquisitionState::Stopped && state_ != AcquisitionState::Ready) ||
+        workspace_owner_ != WorkspaceOwner::Dma || monitor_.state() == DmaRingState::Running ||
+        monitor_.state() == DmaRingState::Copying) { return false; }
+    workspace_.dma.~DmaBuffer();
+    ::new (static_cast<void*>(&workspace_.spectrum)) SpectrumBuffer;
+    workspace_owner_ = WorkspaceOwner::Spectrum;
+    words = workspace_.spectrum.words;
+    return true;
+}
+
+void DmaAcquisition::end_spectrum_workspace() noexcept
+{
+    if (workspace_owner_ != WorkspaceOwner::Spectrum) { return; }
+    workspace_.spectrum.~SpectrumBuffer();
+    ::new (static_cast<void*>(&workspace_.dma)) DmaBuffer;
+    workspace_owner_ = WorkspaceOwner::Dma;
+}
+
+bool DmaAcquisition::begin_recall_staging() noexcept
+{
+    if (state_ != AcquisitionState::Stopped || workspace_owner_ != WorkspaceOwner::Dma) { return false; }
+    workspace_owner_ = WorkspaceOwner::Recall;
+    return true;
+}
+
+void DmaAcquisition::end_recall_staging() noexcept
+{
+    if (workspace_owner_ != WorkspaceOwner::Recall) { return; }
+    workspace_owner_ = WorkspaceOwner::Dma;
+}
+
 bool DmaAcquisition::quiesce() noexcept
 {
     // Only a validated start can enter Running; every caller is cleanup for
@@ -52,7 +86,7 @@ void DmaAcquisition::fail(AcquisitionFault reason) noexcept
 
 bool DmaAcquisition::start(const AcquisitionRequest& request) noexcept
 {
-    if (recall_staging_ || state_ == AcquisitionState::Ready || state_ == AcquisitionState::Running) { return false; }
+    if (workspace_owner_ != WorkspaceOwner::Dma || state_ == AcquisitionState::Ready || state_ == AcquisitionState::Running) { return false; }
     if (!valid_port() || request.epoch == 0U || request.physical.generation == 0U ||
         request.physical.microvolts_per_div == 0U ||
         (request.physical.coupling != InputCoupling::Dc &&
@@ -69,7 +103,7 @@ bool DmaAcquisition::start(const AcquisitionRequest& request) noexcept
     fault_ = AcquisitionFault::None;
     static_cast<void>(quiesce());
     if (!port_.prepare(port_.context, request.timing) ||
-        !port_.arm_dma(port_.context, dma_, DmaRingSamples)) {
+        !port_.arm_dma(port_.context, workspace_.dma.samples, DmaRingSamples)) {
         fail(AcquisitionFault::PortFailure); return false;
     }
     const auto initial = port_.observe(port_.context, true);
@@ -103,7 +137,7 @@ void DmaAcquisition::poll() noexcept
     if (result == DmaPoll::Waiting) { return; }
     if (result == DmaPoll::Fault) { fail(AcquisitionFault::Transport); return; }
     port_.acknowledge(port_.context, lease.acknowledge_flag);
-    const volatile std::uint16_t* source = dma_ + lease.offset;
+    const volatile std::uint16_t* source = workspace_.dma.samples + lease.offset;
     for (std::uint16_t index = 0U; index < DmaHalfSamples; ++index) {
         scratch_[index] = source[index];
     }
@@ -156,7 +190,7 @@ AcquisitionStopResult DmaAcquisition::stop() noexcept
 
 bool DmaAcquisition::release() noexcept
 {
-    if (state_ != AcquisitionState::Ready) { return false; }
+    if (state_ != AcquisitionState::Ready || workspace_owner_ != WorkspaceOwner::Dma) { return false; }
     capture_.stop();
     state_ = AcquisitionState::Stopped;
     return true;

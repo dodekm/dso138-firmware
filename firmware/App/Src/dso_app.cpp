@@ -28,7 +28,6 @@
 namespace {
 
 dso::DmaAcquisition acquisition{dso::stm32_acquisition_port()};
-dso::RollingAcquisition rolling{dso::stm32_oversampled_rolling_port()};
 #if DSO_BOARD_ACQUISITION
 dso::PanelSampler panel_sampler{dso::stm32_panel_port(), {3U, 20U, 1U}};
 // Guarded nominal classic-board ladder bands, checked against the live tuple
@@ -84,13 +83,12 @@ dso::VoltageCalibration resolve_calibration(void* context, const dso::PhysicalSe
 #endif
 }
 #if DSO_BOARD_ACQUISITION
-constexpr dso::UiControllerConfig DormantUiConfig{true, true, {&calibration_bank, resolve_calibration}, &rolling,
+constexpr dso::UiControllerConfig DormantUiConfig{true, true, {&calibration_bank, resolve_calibration}, &scope_storage, &calibration_bank,
 #elif DSO_BOARD_BRINGUP
-constexpr dso::UiControllerConfig DormantUiConfig{false, true, {&calibration_bank, resolve_calibration}, &rolling,
+constexpr dso::UiControllerConfig DormantUiConfig{false, true, {&calibration_bank, resolve_calibration}, &scope_storage, &calibration_bank,
 #else
-constexpr dso::UiControllerConfig DormantUiConfig{false, false, {&calibration_bank, resolve_calibration}, &rolling,
+constexpr dso::UiControllerConfig DormantUiConfig{false, false, {&calibration_bank, resolve_calibration}, &scope_storage, &calibration_bank,
 #endif
-    dso::RollingProcessing::Filtered25, &scope_storage, &calibration_bank,
     {&panel_suspension, dso::PanelSuspension::set_paused},
     {&panel_suspension, dso::PanelSuspension::set_preparing}, DSO_BOARD_ACQUISITION != 0};
 constexpr dso::Stm32DisplayQualification DormantDisplayQualification{false, false, false, false};
@@ -124,7 +122,7 @@ bool route_qualification_action(void* context, dso::QualificationAction action) 
 #endif
 static_assert(sizeof(dso::DmaAcquisition) < 6U * 1024U, "Revisit 20KiB SRAM budget");
 static_assert(sizeof(acquisition) + sizeof(panel_sampler) + sizeof(front_panel) + sizeof(panel_suspension) +
-    sizeof(display) + sizeof(screen) + sizeof(scope_controller) + sizeof(calibration_bank) + sizeof(rolling) +
+    sizeof(display) + sizeof(screen) + sizeof(scope_controller) + sizeof(calibration_bank) +
     sizeof(snapshot_storage) + sizeof(scope_storage) < 16U * 1024U,
     "Leave SRAM for HAL state, the reserved stack and interrupt headroom");
 }
@@ -151,7 +149,6 @@ extern "C" void dso_app_fault(std::uint32_t reason)
     // exist. Only a running owner may invoke its MMIO stop callbacks. Ready and
     // Fault already quiesced themselves; construction/Stopped owns no hardware.
     if (acquisition.state() == dso::AcquisitionState::Running) { static_cast<void>(acquisition.stop()); }
-    if (rolling.state() == dso::RollingState::Running) { static_cast<void>(rolling.stop()); }
     panel_sampler.stop();
 }
 
@@ -220,7 +217,7 @@ extern "C" void dso_app_init(void)
     dso_bench_status.sample_divider = plan.divider;
     dso_bench_status.acquisition_bytes = sizeof(acquisition);
     dso_bench_status.panel_sampler_bytes = sizeof(panel_sampler);
-    dso_bench_status.ui_bytes = sizeof(front_panel) + sizeof(panel_suspension) + sizeof(display) + sizeof(screen) + sizeof(scope_controller) + sizeof(rolling);
+    dso_bench_status.ui_bytes = sizeof(front_panel) + sizeof(panel_suspension) + sizeof(display) + sizeof(screen) + sizeof(scope_controller);
     dso_bench_status.calibration_bank_bytes = sizeof(calibration_bank);
 #if DSO_BOARD_ACQUISITION
     if (!panel_sampler.start()) { dso_app_fault(8U); return; }
@@ -274,7 +271,7 @@ extern "C" void dso_app_idle(void)
 #endif
     const auto ui_progress = scope_controller.service();
     // Always drain both owner flags; events are discarded while the UI is unhealthy.
-    const bool accepted_edge = acquisition.take_accepted_edge() | rolling.take_accepted_edge();
+    const bool accepted_edge = acquisition.take_accepted_edge();
     dso::service_stm32_trigger_led(now, accepted_edge,
         scope_controller.fault() == dso::UiControllerFault::None);
     dso_bench_status.ui_work = static_cast<std::uint32_t>(ui_progress.work);

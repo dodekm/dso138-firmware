@@ -45,7 +45,7 @@
 \fancyhf{}
 \fancyhead[L]{\small\bfseries\color{navy}DSO138}
 \fancyhead[R]{\small\color{muted}USER MANUAL}
-\fancyfoot[L]{\footnotesize\color{muted}Manual 1.2 \enspace|\enspace Firmware: unreleased revision}
+\fancyfoot[L]{\footnotesize\color{muted}Manual 1.3 \enspace|\enspace Firmware: unreleased revision}
 \fancyfoot[R]{\footnotesize\color{muted}\thepage\,/\,\pageref*{LastPage}}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
@@ -121,9 +121,9 @@
 \begin{tabularx}{\linewidth}{@{}YYY@{}}
   {\Large\bfseries\color{teal}4 keys} &
   {\Large\bfseries\color{teal}9 ranges} &
-  {\Large\bfseries\color{teal}24 timebases}\\
+  {\Large\bfseries\color{teal}18 timebases}\\
   Run, hold and edit & 10\,mV/div to 5\,V/div &
-  10\,$\mu$s/div to 500\,s/div
+  10\,$\mu$s/div to 5\,s/div
 \end{tabularx}
 \vspace{6mm}
 {\color{navy}\large\bfseries Find what you need}\par
@@ -136,7 +136,7 @@
   \coverlink{measurements}{Measurements}\par
 \end{minipage}\hfill
 \begin{minipage}[t]{0.47\linewidth}
-  \coverlink{slow}{Slow signals and rolling}\par
+  \coverlink{spectrum}{Spectrum view}\par
   \coverlink{storage}{Save, recall and settings}\par
   \coverlink{calibration}{Optional DC calibration}\par
   \coverlink{troubleshooting}{Troubleshooting}\par
@@ -144,7 +144,7 @@
 \end{minipage}
 \vfill
 {\small\color{muted}
-Manual revision 1.2 \enspace|\enspace 1 November 2026\par
+Manual revision 1.3 \enspace|\enspace 2 November 2026\par
 Firmware source: unreleased revision (UID-configured build required)\par
 Intended hardware: PCB 109-13800-00C, STM32F103C8T6, ILI9341 display.\par
 This guide describes the implemented controls and functions.
@@ -162,8 +162,8 @@ This operating guide assumes a correctly configured firmware image. The current 
 \begin{enumerate}
 \item Connect the onboard test output to the signal input.
 \item Set the physical coupling switch to DC, base sensitivity to 1 V/div, and multiplier to \(\times1\).
-\item Press \key{SEL} until Timebase is selected. Use \key{+}/\key{-} to select 1 ms/div.
-\item Select Trigger mode and choose AUTO with \key{+}/\key{-}.
+\item Press \key{SEL} until Timebase is selected. Use \key{+}/\key{\char45} to select 1 ms/div.
+\item Select Trigger mode and choose AUTO with \key{+}/\key{\char45}.
 \item In an ordinary field such as Timebase, press \key{OK} if the scope is in HOLD. Look for RUN and a repeating square wave.
 \item Press \key{OK} again to hold the record for inspection.
 \end{enumerate}
@@ -179,8 +179,8 @@ On power-up, saved valid settings return in HOLD; press \key{OK} to run. If ther
 \toprule
 Control & Action \\
 \midrule
-\key{SEL} & Move to the next setting field. After Calibration, the sequence returns to Timebase. \\
-\key{+}, \key{-} & Change a value or cycle a choice. For numeric settings, holding a button repeats after about 400 ms, then at about 80 ms intervals. Discrete choices do not repeat. \\
+\key{SEL} & Move to the next setting field. After Domain, the sequence returns to Timebase. \\
+\key{+}, \key{\char45} & Change a value or cycle a choice. For numeric settings, holding a button repeats after about 400 ms, then at about 80 ms intervals. Discrete choices do not repeat. \\
 \key{OK} & Run or hold in ordinary fields; rearm Single when appropriate. In Storage or Calibration, the first press stops acquisition and a later press executes the selected action. Release between presses. \\
 \key{RESET} & Hardware reset. Unsaved edits are lost; the last saved configuration normally returns in HOLD. A reset during flash erase/program can lose saved data; see Saving. \\
 \bottomrule
@@ -203,13 +203,13 @@ The separate coupling switch selects DC, AC, or GND.
 The table gives the nine nominal ranges. The separate coupling switch selects DC (shows the input offset), AC (blocks DC), or GND (selects the internal ground path). These are front-panel sensitivity labels. They do not confirm the input voltage or a probe's attenuation. If using a \(\times10\) probe, account for that factor yourself; there is no probe-attenuation menu.
 
 \subsection*{Trigger activity LED}
-D3 gives a brief, about 100 ms indication for an accepted trigger crossing; another crossing restarts the pulse, so close events may look continuously lit. Auto free-run timeout, recall/HOLD redraw and slow Auto ROLL do not light it. On slow Normal or Single, an accepted edge may light it before the processed record is ready. A Single pulse can finish through automatic HOLD; faults leave it off. This software cue is not a precise timing strobe and has not been tested on hardware.
+D3 gives a brief, about 100 ms indication for an accepted trigger crossing; another crossing restarts the pulse, so close events may look continuously lit. Auto free-run timeout and recall/HOLD redraw do not light it. A Single pulse can finish through automatic HOLD; faults leave it off. This software cue is not a precise timing strobe and has not been tested on hardware.
 
 \manualpage{Reading the screen}{screen}
 
 \screenfigure
 
-The display status tells you what the instrument is doing: \lcd{RUN} or \lcd{ARM} indicates active acquisition or arming, \lcd{HOLD} indicates a stopped view, and \lcd{WAIT INPUT} or \lcd{WAIT BACK} means it is waiting for stable switches or an acquisition backend. On slow settings you may see \lcd{WARMUP}, \lcd{ROLL}, or \lcd{WAIT TRIG}; see Slow timebases.
+The display status tells you what the instrument is doing: \lcd{RUN} or \lcd{ARM} indicates active acquisition or arming, \lcd{HOLD} indicates a stopped view, and \lcd{WAIT INPUT} or \lcd{WAIT BACK} means it is waiting for stable switches or an acquisition backend. The selected Domain controls whether the display shows the scope trace or the spectrum of a completed record.
 
 The plot has 10 horizontal and 8 vertical divisions. The yellow trace/envelope shows available samples; drawing does not create extra samples. Orange marks the trigger position and level; cyan marks the zero reference and selected control. Focus labels beginning \lcd{NEXT} show the value to be used by the next capture, while a held trace continues to show its frozen capture settings. The reference line is labeled \lcd{0V} with a usable voltage profile, or \lcd{REF} when values are raw ADC codes.
 
@@ -221,17 +221,17 @@ The quality tag describes voltage conversion: \lcd{NOM} uses nominal board coeff
 
 \manualpage{Menu and settings}{menu}
 
-Press \key{SEL} to move through the twelve fields. Use \key{+} and \key{-} to adjust; use \key{OK} as shown. The focused field is shown near the bottom of the screen.
+Press \key{SEL} to move through the thirteen fields. Use \key{+} and \key{\char45} to adjust; use \key{OK} as shown. The focused field is shown near the bottom of the screen.
 
 \begin{tabularx}{\linewidth}{@{}p{0.25\linewidth}p{0.40\linewidth}X@{}}
 \toprule
-Focus & \(+\)/\(-\) & \key{OK} \\
+Focus & \key{+}/\key{\char45} & \key{OK} \\
 \midrule
 Timebase & Select a catalogue setting & Run/Hold \\
 Trigger mode & AUTO, NORMAL, SINGLE & Run/Hold; Single rearm \\
 Trigger edge & Rising or falling & Run/Hold; Single rearm \\
 Trigger level & ADC threshold, 16-code steps & Run/Hold; Single rearm \\
-Trigger position & 0--100\%, 2.5\% steps & Run/Hold; Single rearm \\
+Trigger position & 0 to 100\%, 2.5\% steps & Run/Hold; Single rearm \\
 Vertical position & Move reference, 2-pixel steps & Run/Hold; Single rearm \\
 Horizontal position & Pan, 16-sample steps & Run/Hold; Single rearm \\
 Measurements & Overview, Amplitude, RMS/Mean, Freq & Run/Hold \\
@@ -239,10 +239,11 @@ Storage & Choose one of six actions & Stop, then execute \\
 Calibration reference & Set signed reference value & Stop, then cycle step \\
 Calibration tolerance & Set allowed error & Stop, then cycle step \\
 Calibration & Begin, Accept Ref, Install, Abort & Stop, then execute \\
+Domain & Spectrum or Scope & Run/Hold \\
 \bottomrule
 \end{tabularx}
 
-For Storage and Calibration, if acquisition is running, the first \key{OK} changes to HOLD. Release the button, then press \key{OK} again to carry out the selected action. In Reference and Tolerance, \key{OK} in HOLD cycles the decimal edit step; \key{+} and \key{-} change the value by that step. Use \lcd{SAVE CONFIG} for the eight scope settings listed under Storage. Reference/tolerance editors are not saved by that action.
+For Storage and Calibration, if acquisition is running, the first \key{OK} changes to HOLD. Release the button, then press \key{OK} again to carry out the selected action. In Reference and Tolerance, \key{OK} in HOLD cycles the decimal edit step; \key{+} and \key{\char45} change the value by that step. In Domain, \key{+} selects Spectrum and \key{\char45} selects Scope; the choice is session-only and the instrument starts in Scope after boot. \lcd{SAVE CONFIG} still saves the eight scope settings listed under Storage; it does not save the Domain choice. Reference/tolerance editors are not saved by that action.
 
 \manualpage{Triggering and viewing}{triggering}
 
@@ -254,7 +255,7 @@ For Storage and Calibration, if acquisition is running, the first \key{OK} chang
 
 Choose rising or falling edge in Trigger edge. Trigger level changes in 16 ADC-code steps; it is a code threshold, not a calibrated voltage setting. Trigger position moves from 0\% to 100\% of the record in 2.5\% steps, selecting how much history lies before the trigger in ordinary triggered captures.
 
-Timebase, trigger mode, edge, level and trigger position affect capture. Changing them during a run invalidates the incomplete record. On a held or recalled trace, timebase changes zoom the existing samples; they do not resample the waveform. Areas outside the captured record remain empty. Vertical \key{+} moves the reference down; \key{-} moves it up. Horizontal \key{+} pans toward later source samples; \key{-} pans toward earlier samples, in 16-sample steps. These view adjustments do not make a new capture.
+Timebase, trigger mode, edge, level and trigger position affect capture. Changing them during a run invalidates the incomplete record. On a held or recalled trace, timebase changes zoom the existing samples; they do not resample the waveform. Areas outside the captured record remain empty. Vertical \key{+} moves the reference down; \key{\char45} moves it up. Horizontal \key{+} pans toward later source samples; \key{\char45} pans toward earlier samples, in 16-sample steps. These view adjustments do not make a new capture.
 
 \subsection*{Example: trigger position at 50\%}
 \begin{center}
@@ -293,40 +294,37 @@ F & Detected repetition rate, when valid. \\
 
 With \lcd{RAW}, the display reports ADC codes (marked \lcd{c}) rather than input volts. \lcd{NOM} uses the board's nominal conversion coefficients. \lcd{CAL} means an installed measured DC profile is being used. A displayed voltage is a converted estimate, not an accuracy guarantee. AC-coupled mean and total RMS describe the AC-coupled signal; they cannot restore removed DC.
 
-Frequency needs at least three qualified complete periods. A clear trace can still show \lcd{-- CYCLES} when it is too short. Other reasons can include low amplitude, instability, clipping, grounding or a rate outside estimator limits. Frequency is observed repetition, not proof of the signal's fundamental frequency. Aliasing can produce a plausible but incorrect value.
+Frequency needs at least three qualified complete periods. A clear trace can still show \lcd{\char45\kern0pt\char45\ CYCLES} when it is too short. Other reasons can include low amplitude, instability, clipping, grounding or a rate outside estimator limits. Frequency is observed repetition, not proof of the signal's fundamental frequency. Aliasing can produce a plausible but incorrect value.
 
-Any ADC rail hit or slow-filter clamp suppresses valid amplitude and frequency claims; the display may show \lcd{ADC CLIP}, \lcd{RAW ADC CLIP}, \lcd{FIR CLAMP}, or \lcd{F -- CLIP; volts invalid}. A missing voltage profile gives \lcd{RAW: no volts}. Stop and correct the input/range before relying on another record. As a mathematical illustration only, an ideal 0-to-3.3 V, 50\% duty square wave has 3.3 V PP, 1.65 V mean, 2.33 V total RMS and 1.65 V AC RMS. These calculated values are not a test or specification of the onboard output.
+An ADC rail hit suppresses valid amplitude and frequency claims; the scope view may show \lcd{ADC CLIP}, \lcd{RAW ADC CLIP}, or \lcd{F \char45\kern0pt\char45 CLIP; volts invalid}. A missing voltage profile gives \lcd{RAW: no volts}. Stop and correct the input/range before relying on another record. Clipping can add harmonics to the Spectrum view; it has no separate clipping warning, so check the same record in Scope view. As a mathematical illustration only, an ideal 0-to-3.3 V, 50\% duty square wave has 3.3 V PP, 1.65 V mean, 2.33 V total RMS and 1.65 V AC RMS. These calculated values are not a test or specification of the onboard output.
 
-\manualpage{Slow timebases}{slow}
+\manualpage{Spectrum view}{spectrum}
 
-The six slow settings use rolling history. A full 10-division window takes a long time to fill. The first valid filtered point appears after the nominal warm-up shown here; the delay is additional history behind the point being displayed.
+Spectrum view analyzes 512 consecutive samples from a completed, frozen record. The calculation uses the record's known timer rate and the same sample block throughout. With RUN active, a new completed capture produces a refreshed spectrum; analysis runs after capture, not while the ADC is sampling. HOLD and recalled records can also be viewed. A record must contain at least 512 samples and have known timing.
 
-\begin{tabularx}{\linewidth}{@{}p{0.18\linewidth}p{0.24\linewidth}p{0.24\linewidth}X@{}}
+The analyzer subtracts the block mean and applies a fixed periodic Hann window before the 512-point FFT. Mean removal suppresses DC, so a constant or zero input has no positive-frequency peak and the readout shows \lcd{Peak \char45\kern0pt\char45}. The Hann window reduces leakage from tones between frequency bins, while spreading a tone over nearby bins. The peak readout uses the strongest positive-frequency bin without interpolation, so its frequency is quantized in steps of \(\Delta f = F_s/512\).
+
+\begin{tabularx}{\linewidth}{@{}p{0.27\linewidth}X@{}}
 \toprule
-Setting & 10-division span & First valid point & Nominal output rate \\
+Display item & Meaning \\
 \midrule
-10 s/div & 100 s & 2.9 s & 5.12 samples/s \\
-20 s/div & 200 s & 5.8 s & 2.56 samples/s \\
-50 s/div & 500 s & 14.6 s & 1.024 samples/s \\
-100 s/div & 1,000 s & 29.1 s & 0.512 samples/s \\
-200 s/div & 2,000 s & 58.3 s & 0.256 samples/s \\
-500 s/div & 5,000 s & 145.7 s & 0.1024 samples/s \\
+Horizontal axis & From 0 Hz to the Nyquist frequency, \(F_s/2\). The label \lcd{df} gives the bin spacing \(F_s/512\). \(F_s\) is the configured sample rate derived from the timer plan, not an independently measured clock or accuracy specification. \\
+Vertical axis & Fixed 80 dB span from +10 to -70 dBFS, at 10 dB/div. The 0 dBFS marker is 22 pixels below the plot top. \\
+\lcd{Pk} readout & Strongest positive-frequency bin, in hertz, followed by its level in dBFS. \\
 \bottomrule
 \end{tabularx}
 
-The active filtered mode takes 25 raw ADC samples for each output interval and applies two digital filter stages. The first valid output appears after about 14.92 output intervals of warm-up; the filter's delay is about 7.44 output intervals. Wait through \lcd{WARMUP} before judging the trace. These timing values describe the configured design, not a measured accuracy or noise specification. Slow settings are useful for observing slow changes and drift; do not infer that a rapidly changing signal is captured between the sparse output points.
+dBFS uses a peak reference of 2048 ADC codes: 0 dBFS corresponds to a 2048-code sinusoidal peak in the input-code scale. It is not a voltage reading, and the Spectrum view does not use the installed voltage calibration. Length, window, frequency span and vertical scale are fixed.
 
-\begin{itemize}[leftmargin=*]
-\item \lcd{ROLL} means Auto is building/updating rolling history.
-\item \lcd{WAIT TRIG} means Normal or Single is waiting for a qualifying trigger.
-\item \lcd{AA25} marks the filtered path. Its digital filter does not prevent aliasing of signals above the raw ADC Nyquist limit; use suitable external signal bandwidth limits.
-\end{itemize}
+Nyquist is the highest frequency represented without folding for the sampled block. Higher-frequency energy can alias into the displayed band and appear as a plausible lower-frequency peak; the Hann window does not prevent aliasing. Use suitable analog bandwidth limits ahead of the ADC when the signal may contain energy above Nyquist. ADC clipping can create harmonics that look like real signal components. Spectrum view has no clipping warning; check the same record in Scope view for its ADC clipping status.
 
-Use DC coupling for slow levels or drift: AC coupling can suppress very slow changes. Slow-mode analog response is not fully physically qualified. Faster screen redraw cannot replace missing samples.
+\begin{manualnote}{Accessing the spectrum}
+Use \key{SEL} to focus Domain, then press \key{+} for Spectrum or \key{\char45} for Scope. In RUN, each new complete record is analyzed after capture; in HOLD, the current or recalled record remains available. The Domain choice is not stored by \lcd{SAVE CONFIG} and resets to Scope after restart.
+\end{manualnote}
 
 \manualpage{Saving, loading and recalling}{storage}
 
-Storage offers six actions in the Storage field. Select one with \key{+}/\key{-}; waveform saving requires a complete, fully processed held record. A valid recalled record may also be saved. If running, press \key{OK}, release, then press it again to execute. Wait for \lcd{SAVED} after a save before changing power or resetting.
+Storage offers six actions in the Storage field. Select one with \key{+}/\key{\char45}; waveform saving requires a complete, fully processed held record. A valid recalled record may also be saved. If running, press \key{OK}, release, then press it again to execute. Wait for \lcd{SAVED} after a save before changing power or resetting.
 
 \begin{tabularx}{\linewidth}{@{}p{0.27\linewidth}X@{}}
 \toprule
@@ -349,6 +347,8 @@ Saved records occupy one 2\,KiB storage region in the device flash. A reset or p
 
 Flash endurance is finite. Avoid repeated unnecessary saves. Physical interruption recovery and endurance have not been fully qualified. \lcd{HOLD TO SAVE} means first obtain and hold a complete processed record. A recalled waveform cannot be used as an applied calibration reference.
 
+Records saved with one of the removed 10 s/div through 500 s/div timebase indices are not recalled by this firmware. Opening such a record does not erase or rewrite it. An explicit save of supported settings, a waveform, or calibration can replace the single storage slot.
+
 \manualpage{Optional DC calibration}{calibration}
 
 Leave the nominal profile in place unless you have suitable, stable reference-voltage equipment. The onboard test output is not a calibration standard. Calibration converts ADC codes to voltage for DC measurements; it does not qualify AC response, bandwidth, the clock or probe attenuation.
@@ -365,7 +365,7 @@ To acquire each reference, leave the calibration fields with \key{SEL}, select a
 \item Choose \lcd{ABORT} to discard a pending candidate. Abort leaves any already installed profile in place.
 \end{enumerate}
 
-In Reference and Tolerance, \key{OK} cycles the decimal step (powers of ten); it does not move a cursor digit by digit. \key{+}/\key{-} changes the numeric value by that step. Replace an unsuitable held record with a fresh one. A switch change, failed two-point fit or failed third-point check requires \lcd{BEGIN} and a new session. Installation and saving do not certify hardware accuracy; an external comparison is still required.
+In Reference and Tolerance, \key{OK} cycles the decimal step (powers of ten); it does not move a cursor digit by digit. \key{+}/\key{\char45} changes the numeric value by that step. Replace an unsuitable held record with a fresh one. A switch change, failed two-point fit or failed third-point check requires \lcd{BEGIN} and a new session. Installation and saving do not certify hardware accuracy; an external comparison is still required.
 
 \manualpage{Troubleshooting}{troubleshooting}
 
@@ -375,12 +375,14 @@ Screen status or symptom & What to do \\
 \midrule
 No trace or an empty plot & Choose AUTO, return to RUN and wait for a record. Set vertical and horizontal position to zero; a panned or zoomed held view can lie outside the captured data. \\
 \lcd{WAIT INPUT}, \lcd{Switches settling} & Check the physical slide-switch positions and allow them to settle. \\
-\lcd{WAIT BACK}, \lcd{No slow capture; view only} & The selected timebase/backend is unavailable in this run. Choose a supported timebase or restart the instrument if the condition persists. \\
-\lcd{WARMUP} & Wait for the slow filter to produce its first valid output. \\
 \lcd{WAIT TRIG} & In Normal or Single, check that the input crosses the selected trigger level and edge. \\
-\lcd{-- CYCLES} & Select a wider time span so more periods fit in the fixed record. For the onboard signal, try 1 ms/div. \\
+\lcd{FFT NEEDS FROZEN FRAME} & Complete a capture and hold it before selecting Spectrum. \\
+\lcd{FFT NEEDS HELD UNIFORM BLOCK}, \lcd{FFT NEEDS 512 SAMPLES} & Hold a complete record with at least 512 uniformly timed samples. \\
+\lcd{FFT TIMING UNKNOWN} & Select a timebase with a valid timer plan, then acquire a fresh record. \\
+\lcd{Peak \char45\kern0pt\char45} & The mean-removed block has no nonzero positive-frequency bin. A DC-only input is removed before analysis. \\
+\lcd{\char45\kern0pt\char45\ CYCLES} & Select a wider time span so more periods fit in the fixed record. For the onboard signal, try 1 ms/div. \\
 \lcd{RAW: no volts} & Voltage calibration is unavailable. Read ADC codes only or restore/use an appropriate profile. \\
-\lcd{ADC CLIP}, \lcd{FIR CLAMP} & Reduce the input or choose a suitable physical range, then capture again. \\
+\lcd{ADC CLIP}, \lcd{RAW ADC CLIP} & Reduce the input or choose a suitable physical range, then capture again. Clipping can add false harmonics in Spectrum view. \\
 \lcd{OLD range/coupling held} & The held record belongs to the previous switch setting. Run a fresh capture. \\
 \lcd{HOLD TO SAVE} & Wait in HOLD for a complete, fully processed record, then retry. \\
 \lcd{EMPTY}, \lcd{READ ONLY}, \lcd{DISABLED} & The requested storage item is absent or the action is unavailable; check selection and status. \\
@@ -400,20 +402,20 @@ Unit & Values \\
 \midrule
 Microseconds (\(\mu\)s/div) & 10, 20, 50, 100, 200, 500 \\
 Milliseconds (ms/div) & 1, 2, 5, 10, 20, 50, 100, 200, 500 \\
-Seconds (s/div) & 1, 2, 5, 10, 20, 50, 100, 200, 500 \\
+Seconds (s/div) & 1, 2, 5 \\
 \bottomrule
 \end{tabularx}
 
-There are 24 settings. Fast acquisition uses a configured maximum of 500 ksample/s; this is a timer plan, not an independently measured sample rate, jitter or timebase accuracy. Slow settings use the rolling path described earlier. The horizontal scale, display refresh and acquisition rate are different quantities.
+This firmware supports 18 triggered settings from 10\,$\mu$s/div to 5\,s/div. The original DSO138 and other firmware may describe longer settings; they are not available in this firmware. The configured fast acquisition rate reaches 500 ksample/s; this is a timer plan, not an independently measured sample rate, jitter or timebase accuracy. The horizontal scale, display refresh and acquisition rate are different quantities.
 
 \textbf{Voltage and probe limits.} Nominal range labels and \lcd{NOM} conversion use board coefficients; they are not a production calibration. \lcd{CAL} indicates a measured profile is installed, but does not replace independent verification. \lcd{RAW} provides codes, not input volts. No probe attenuation is selected by firmware; multiply displayed input estimates by the probe factor when applicable. Do not treat the onboard signal as an absolute reference. No maximum safe input is specified here: follow the board's own input markings and limits.
 
 \begin{manualnote}{Firmware identity and qualification}
-The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks; 1.0.1 has not been flashed or tested on hardware. The current unreleased source revision changes saved-data layout to a single flash bank as described under Saving; it has not been flashed or tested on hardware. This change does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, slow-path performance and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
+The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks; 1.0.1 has not been flashed or tested on hardware. The current unreleased source revision changes saved-data layout to a single flash bank and adds a software FFT display; these changes have not been flashed or tested on hardware. This change does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, FFT analog accuracy, alias response and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
 \end{manualnote}
 
 \vfill
-\begin{center}\footnotesize Manual revision 1.2: 1 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
+\begin{center}\footnotesize Manual revision 1.3: 2 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, \texttt{firmware/App/Src/dso\_spectrum.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
 
 
 \end{document}

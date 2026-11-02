@@ -6,8 +6,8 @@
 #include "dso_measurements.hpp"
 #include "dso_calibration.hpp"
 #include "dso_calibration_session.hpp"
-#include "dso_rolling.hpp"
 #include "dso_scope_storage.hpp"
+#include "dso_spectrum.hpp"
 
 namespace dso {
 
@@ -33,8 +33,6 @@ struct UiControllerConfig final {
     bool acquisition_enabled{};
     bool rendering_enabled{};
     CalibrationSource calibration{};
-    RollingAcquisition* rolling{}; // Optional; absent backend remains inhibited.
-    RollingProcessing slow_processing{RollingProcessing::Filtered25};
     ScopeStorage* storage{}; // Optional; identity zero leaves even reads disabled.
     // When supplied, this is also the sole per-arm calibration resolver. Zero
     // board identity still disables the workflow; construction grants no I/O.
@@ -45,8 +43,8 @@ struct UiControllerConfig final {
 };
 enum class UiStorageStatus : std::uint8_t { Disabled, Idle, Busy, Saved, Recalled, Restored, Empty, Error, ReadOnly, HoldRequired };
 enum class UiCalibrationStatus : std::uint8_t { Disabled, Ready, HoldRequired, ReferenceRequired, Updated, Error };
-enum class UiControllerFault : std::uint8_t { None, Acquisition, Copy, Projection, Display, Configuration, Measurement };
-enum class UiWork : std::uint8_t { Idle, Copying, Measuring, Projecting, Rendering };
+enum class UiControllerFault : std::uint8_t { None, Acquisition, Copy, Projection, Display, Configuration, Measurement, Spectrum };
+enum class UiWork : std::uint8_t { Idle, Copying, Measuring, Projecting, Rendering, Spectrum };
 struct UiServiceResult final {
     UiWork work;
     std::uint16_t copied;
@@ -67,7 +65,7 @@ public:
                     UiControllerConfig config = {}) noexcept;
     // End the renderer's projection borrow. External acquisition/storage
     // owners outlive this object; outstanding storage jobs must finish first.
-    ~ScopeController() noexcept { screen_.cancel(); }
+    ~ScopeController() noexcept { cancel_consumers(); }
     ScopeController(const ScopeController&) = delete;
     ScopeController& operator=(const ScopeController&) = delete;
     // Apply every tuple (including invalid tuples) BEFORE service/arm. The
@@ -84,10 +82,6 @@ public:
     [[nodiscard]] const WaveformProjection& projection() const noexcept { return projection_; }
     [[nodiscard]] const ScreenSnapshot& scene() const noexcept { return screen_.view_; }
     [[nodiscard]] ScopeTimebaseSupport timebase_support() const noexcept { return plan_.support; }
-    [[nodiscard]] bool rolling_frame() const noexcept { return frame_valid_ && frame_rolling_; }
-    // Copy with frame_metadata/measurements: one stream epoch has many windows.
-    [[nodiscard]] std::uint64_t rolling_revision() const noexcept
-    { return rolling_frame() ? rolling_snapshot_.revision : 0U; }
     [[nodiscard]] bool acquisition_running() const noexcept;
     [[nodiscard]] bool recalled_frame() const noexcept { return frame_valid_ && frame_recalled_; }
     [[nodiscard]] bool storage_busy() const noexcept { return storage_phase_ != StoragePhase::Idle; }
@@ -120,9 +114,9 @@ private:
     void fail(UiControllerFault reason) noexcept;
     void arm(std::uint32_t request) noexcept;
     void begin_copy() noexcept;
-    void begin_rolling_copy(const RollingSnapshot& snapshot, bool ready) noexcept;
     void poll_acquisition() noexcept;
     void redraw() noexcept;
+    void begin_spectrum() noexcept;
     void present() noexcept;
     void finish_presentation() noexcept;
     void format_scene() noexcept;
@@ -148,17 +142,14 @@ private:
     std::array<std::uint16_t, CaptureCapacity> samples_{};
     WaveformProjection projection_{};
     WaveformProjector projector_{};
+    SpectrumAnalyzer spectrum_{};
     MeasurementEngine measurement_{};
     std::uint16_t copied_{};
     bool frame_valid_{};
+    bool spectrum_workspace_leased_{};
     bool pending_consumption_{};
-    RollingSnapshot rolling_snapshot_{};
-    bool active_slow_{};
-    bool frame_rolling_{};
-    bool copying_slow_{};
-    bool pending_slow_release_{};
-    bool rolling_hold_pending_{};
-    bool slow_status_pending_{};
+    bool frame_legacy_rolling_{};
+    std::uint64_t frame_legacy_rolling_revision_{};
     StoragePhase storage_phase_{StoragePhase::Idle};
     StorageCommand storage_command_{StorageCommand::None};
     UiStorageStatus storage_status_{UiStorageStatus::Disabled};

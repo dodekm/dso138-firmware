@@ -118,7 +118,8 @@ void ScopeUi::set_capture_inhibited(bool inhibited) noexcept
 bool ScopeUi::repeatable() const noexcept
 {
     return focus_ != UiFocus::TriggerMode && focus_ != UiFocus::TriggerEdge &&
-        focus_ != UiFocus::Measurements && focus_ != UiFocus::Storage && focus_ != UiFocus::Calibration;
+        focus_ != UiFocus::Measurements && focus_ != UiFocus::Storage && focus_ != UiFocus::Calibration &&
+        focus_ != UiFocus::Domain;
 }
 
 std::uint32_t ScopeUi::calibration_edit_step() const noexcept
@@ -173,6 +174,11 @@ void ScopeUi::adjust(int direction) noexcept
             static_cast<int>(settings_.measurement_view), direction, 0, 3));
         capture_change = false;
         break;
+    case UiFocus::Domain: {
+        const auto next = direction > 0 ? Domain::Spectrum : Domain::Scope;
+        if (domain_ != next) { domain_ = next; redraw(); }
+        return;
+    }
     case UiFocus::Storage: {
         const auto next = static_cast<StorageAction>(bounded(static_cast<int>(storage_action_), direction, 0, 5));
         if (next != storage_action_) { storage_action_ = next; redraw(); }
@@ -439,6 +445,8 @@ bool ScopeUi::restore_boot_settings(const ScopeUiSettings& settings) noexcept
 {
     if (!can_restore_boot_settings(settings)) { return false; }
     commit_restored_settings(settings);
+    domain_ = Domain::Scope;
+    redraw();
     return true;
 }
 

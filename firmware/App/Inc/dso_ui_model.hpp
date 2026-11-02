@@ -11,10 +11,11 @@ namespace dso {
 enum class UiFocus : std::uint8_t {
     Timebase, TriggerMode, TriggerEdge, TriggerLevel, TriggerPosition,
     VerticalPosition, HorizontalPosition, Measurements, Storage,
-    CalibrationReference, CalibrationTolerance, Calibration, Count
+    CalibrationReference, CalibrationTolerance, Calibration, Domain, Count
 };
 
 enum class MeasurementView : std::uint8_t { Overview, Amplitude, Rms, Frequency };
+enum class Domain : std::uint8_t { Scope, Spectrum };
 enum class StorageAction : std::uint8_t { SaveWaveform, RecallWaveform, SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
 enum class StorageCommand : std::uint8_t { None, SaveWaveform, RecallWaveform, SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
 enum class CalibrationAction : std::uint8_t { Begin, AcceptReference, Install, Abort };
@@ -115,6 +116,7 @@ public:
     [[nodiscard]] const ScopeUiSettings& settings() const noexcept { return settings_; }
     [[nodiscard]] const PhysicalSettings& physical() const noexcept { return physical_; }
     [[nodiscard]] UiFocus focus() const noexcept { return focus_; }
+    [[nodiscard]] Domain domain() const noexcept { return domain_; }
     [[nodiscard]] StorageAction storage_action() const noexcept { return storage_action_; }
     [[nodiscard]] CalibrationAction calibration_action() const noexcept { return calibration_action_; }
     [[nodiscard]] std::int32_t reference_microvolts() const noexcept { return reference_microvolts_; }
@@ -144,6 +146,8 @@ private:
                               2048U, 500U, 0, 0};
     PhysicalSettings physical_{0U, 0U, InputCoupling::Unknown};
     UiFocus focus_{UiFocus::Timebase};
+    // Session-only FFT view state; saved scope settings and records stay unchanged.
+    Domain domain_{Domain::Scope};
     StorageAction storage_action_{StorageAction::SaveWaveform};
     StorageCommand storage_pending_{StorageCommand::None};
     CalibrationAction calibration_action_{CalibrationAction::Begin};

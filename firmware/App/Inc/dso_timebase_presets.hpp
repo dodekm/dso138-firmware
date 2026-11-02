@@ -8,7 +8,7 @@
 namespace dso::detail {
 struct TimerPair final { std::uint16_t prescaler, period; };
 inline constexpr std::uint32_t PresetTimebases[]{
-    10U, 20U, 50U, 100U, 200U, 500U, 1000U, 2000U, 5000U, 10000U, 20000U, 50000U, 100000U, 200000U, 500000U, 1000000U, 2000000U, 5000000U, 10000000U, 20000000U, 50000000U, 100000000U, 200000000U, 500000000U
+    10U, 20U, 50U, 100U, 200U, 500U, 1000U, 2000U, 5000U, 10000U, 20000U, 50000U, 100000U, 200000U, 500000U, 1000000U, 2000000U, 5000000U
 };
 inline constexpr TimerPair ScopePresets[]{
     {0U, 143U},
@@ -28,21 +28,7 @@ inline constexpr TimerPair ScopePresets[]{
     {5U, 58593U},
     {14U, 46874U},
     {24U, 56249U},
-    {74U, 46874U},
-    {124U, 56249U},
-    {224U, 62499U},
-    {624U, 56249U},
-    {1124U, 62499U},
-    {2249U, 62499U},
-    {5624U, 62499U}
-};
-inline constexpr TimerPair RollingPresets[]{
-    {224U, 62499U},
-    {449U, 62499U},
-    {1124U, 62499U},
-    {2249U, 62499U},
-    {4499U, 62499U},
-    {11249U, 62499U}
+    {74U, 46874U}
 };
 template<std::size_t N> constexpr std::uint32_t preset_fingerprint(const TimerPair (&pairs)[N]) noexcept
 {
@@ -52,7 +38,6 @@ template<std::size_t N> constexpr std::uint32_t preset_fingerprint(const TimerPa
     }
     return hash;
 }
-static_assert(preset_fingerprint(ScopePresets) == 0x157e58d6U, "Regenerate scope presets");
-static_assert(preset_fingerprint(RollingPresets) == 0x00e8c397U, "Regenerate rolling presets");
+static_assert(preset_fingerprint(ScopePresets) == 0xee5f02c8U, "Regenerate scope presets");
 } // namespace dso::detail
 #endif

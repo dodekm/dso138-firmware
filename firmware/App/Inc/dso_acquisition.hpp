@@ -5,6 +5,8 @@
 #include "dso_dma_ring.hpp"
 #include "dso_front_panel.hpp"
 #include "dso_timebase.hpp"
+#include <new>
+#include <type_traits>
 
 namespace dso {
 
@@ -95,9 +97,27 @@ public:
     [[nodiscard]] const DmaTimingStatistics& timing_statistics() const noexcept { return monitor_.timing_statistics(); }
 
 private:
-    // Foreground recall staging borrows the stopped DMA array. Only the
-    // controller can hold this lease; no HAL callback or frame consumer sees it.
+    // The acquisition owner and its sole foreground controller coordinate this
+    // storage. Spectrum can borrow the stopped 2 KiB DMA workspace while the
+    // frozen Capture remains in its separate sample array. Recall also borrows
+    // the DMA member, but its byte/sample staging is mutually exclusive.
     friend class ScopeController;
+    struct DmaBuffer final { std::uint16_t samples[DmaRingSamples]; };
+    struct SpectrumBuffer final { std::int32_t words[DmaRingSamples / 2U]; };
+    static_assert(sizeof(DmaBuffer) == sizeof(SpectrumBuffer), "Workspace alternatives must share storage");
+    static_assert(std::is_trivial<DmaBuffer>::value && std::is_trivial<SpectrumBuffer>::value,
+                  "Workspace alternatives must remain trivial wrappers");
+    union Workspace final {
+        DmaBuffer dma;
+        SpectrumBuffer spectrum;
+        Workspace() noexcept : dma{} {}
+    };
+    static_assert(sizeof(Workspace) == 2048U, "Keep the FFT/DMA lease within the existing 2 KiB workspace");
+    enum class WorkspaceOwner : std::uint8_t { Dma, Recall, Spectrum };
+    [[nodiscard]] bool begin_spectrum_workspace(std::int32_t*& words) noexcept;
+    void end_spectrum_workspace() noexcept;
+    [[nodiscard]] bool begin_recall_staging() noexcept;
+    void end_recall_staging() noexcept;
     [[nodiscard]] bool quiesce() noexcept;
     void fail(AcquisitionFault reason) noexcept;
     [[nodiscard]] bool valid_port() const noexcept;
@@ -107,10 +127,10 @@ private:
     FrameMetadata metadata_{};
     AcquisitionState state_{AcquisitionState::Stopped};
     AcquisitionFault fault_{AcquisitionFault::None};
-    bool recall_staging_{};
+    WorkspaceOwner workspace_owner_{WorkspaceOwner::Dma};
     AcquisitionStatistics statistics_{};
     std::uint32_t tail_samples_{};
-    alignas(4) std::uint16_t dma_[DmaRingSamples]{};
+    Workspace workspace_{};
     std::uint16_t scratch_[DmaHalfSamples]{};
 };
 

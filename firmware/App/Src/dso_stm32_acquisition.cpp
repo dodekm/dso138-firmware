@@ -1,6 +1,5 @@
 #include "dso_stm32_acquisition.hpp"
 #include "dso_stm32_adc.hpp"
-#include "dso_rolling.hpp"
 #include "main.h"
 
 extern "C" {
@@ -12,22 +11,7 @@ extern TIM_HandleTypeDef htim2;
 namespace dso {
 namespace {
 
-enum class Backend : std::uint8_t { None, Fast, Rolling, FilteredRolling };
-constexpr std::uint16_t RollingDmaCount{2U};
-constexpr std::uint16_t OversampledRollingDmaCount{16U};
-static_assert(OversampledRollingDmaCount == RollingOversampledDmaSamples,
-              "Filtered STM32 transport must match the portable DMA allocation");
-constexpr std::uint32_t MinimumRollingDivider{14062500U}; // 100 s / 512 points at 72 MHz.
-constexpr std::uint32_t MaximumRollingDivider{703125000U}; // 5000 s / 512 points.
-
-bool oversampled_divider_valid(std::uint32_t divider) noexcept
-{
-    // Exact 25:1 ratios of the six 512-point output plans, not a free-form
-    // frequency range. Keep the factory's hardware contract independently
-    // checked rather than relying on portable caller validation alone.
-    return divider == 562500U || divider == 1125000U || divider == 2812500U ||
-        divider == 5625000U || divider == 11250000U || divider == 28125000U;
-}
+enum class Backend : std::uint8_t { None, Fast };
 
 struct Context final {
     Stm32AcquisitionQualification qualification{};
@@ -94,7 +78,7 @@ bool stop_acquisition(void* value) noexcept
     return stop_dma(value);
 }
 
-bool prepare_backend(const TimebasePlan& plan, Backend backend) noexcept
+bool prepare(void*, const TimebasePlan& plan) noexcept
 {
     context.prepared = false;
     context.dma_armed = false;
@@ -130,14 +114,6 @@ bool prepare_backend(const TimebasePlan& plan, Backend backend) noexcept
         hadc1.Init.NbrOfConversion != 1U ||
         hadc1.Init.ExternalTrigConv != ADC_EXTERNALTRIGCONV_T2_CC2 || plan.period == 0U || plan.divider < 138U ||
         (std::uint64_t{plan.prescaler} + 1U) * (std::uint64_t{plan.period} + 1U) != plan.divider) { return false; }
-    if (backend == Backend::Rolling &&
-        (plan.divider < MinimumRollingDivider || plan.divider > MaximumRollingDivider)) {
-        return false;
-    }
-    if (backend == Backend::FilteredRolling &&
-        !oversampled_divider_valid(plan.divider)) {
-        return false;
-    }
     RCC_ClkInitTypeDef clocks{};
     std::uint32_t latency{};
     HAL_RCC_GetClockConfig(&clocks, &latency);
@@ -181,26 +157,16 @@ bool prepare_backend(const TimebasePlan& plan, Backend backend) noexcept
     __HAL_DBGMCU_FREEZE_TIM2();
     context.error_latch = 0U;
     HAL_NVIC_ClearPendingIRQ(DMA1_Channel1_IRQn);
-    context.backend = backend;
+    context.backend = Backend::Fast;
     context.prescaler = plan.prescaler; context.period = plan.period;
-    context.expected_count = backend == Backend::Rolling ? RollingDmaCount :
-        (backend == Backend::FilteredRolling ? OversampledRollingDmaCount : DmaRingSamples);
+    context.expected_count = DmaRingSamples;
     context.prepared = true;
     return true;
 }
 
-bool prepare(void*, const TimebasePlan& plan) noexcept
-{ return prepare_backend(plan, Backend::Fast); }
-
-bool prepare_rolling(void*, const TimebasePlan& plan) noexcept
-{ return prepare_backend(plan, Backend::Rolling); }
-
-bool prepare_oversampled_rolling(void*, const TimebasePlan& plan) noexcept
-{ return prepare_backend(plan, Backend::FilteredRolling); }
-
-bool arm_dma_backend(std::uint16_t* destination, std::uint16_t count, Backend backend) noexcept
+bool arm_dma(void*, std::uint16_t* destination, std::uint16_t count) noexcept
 {
-    if (!context.prepared || context.backend != backend || destination == nullptr ||
+    if (!context.prepared || context.backend != Backend::Fast || destination == nullptr ||
         context.expected_count == 0U || count != context.expected_count ||
         (reinterpret_cast<std::uintptr_t>(destination) & 3U) != 0U ||
         hdma_adc1.State != HAL_DMA_STATE_READY || hdma_adc1.Lock != HAL_UNLOCKED ||
@@ -235,15 +201,6 @@ bool arm_dma_backend(std::uint16_t* destination, std::uint16_t count, Backend ba
     return context.dma_armed;
 }
 
-bool arm_dma(void*, std::uint16_t* destination, std::uint16_t count) noexcept
-{ return arm_dma_backend(destination, count, Backend::Fast); }
-
-bool arm_dma_rolling(void*, std::uint16_t* destination, std::uint16_t count) noexcept
-{ return arm_dma_backend(destination, count, Backend::Rolling); }
-
-bool arm_dma_oversampled_rolling(void*, std::uint16_t* destination, std::uint16_t count) noexcept
-{ return arm_dma_backend(destination, count, Backend::FilteredRolling); }
-
 bool start_trigger(void*) noexcept
 {
     if (!context.prepared || !context.dma_armed || context.backend == Backend::None ||
@@ -260,9 +217,9 @@ bool start_trigger(void*) noexcept
     return (TIM2->CR1 & TIM_CR1_CEN) != 0U && TIM2->CCER == TIM_CCER_CC2E;
 }
 
-DmaObservation observe_backend(bool before, bool cycle_timing) noexcept
+DmaObservation observe_backend(bool before) noexcept
 {
-    const auto first = cycle_timing ? DWT->CYCCNT : 0U;
+    const auto first = DWT->CYCCNT;
     std::uint32_t flags_before{};
     std::uint32_t flags_after{};
     std::uint32_t count{};
@@ -283,16 +240,13 @@ DmaObservation observe_backend(bool before, bool cycle_timing) noexcept
     }
     const auto enabled = (DMA1_Channel1->CCR & DMA_CCR_EN) != 0U;
     const auto milliseconds = HAL_GetTick();
-    const auto last = cycle_timing ? DWT->CYCCNT : 0U;
+    const auto last = DWT->CYCCNT;
     return {before ? first : last, milliseconds,
             static_cast<std::uint16_t>(count), flags, enabled};
 }
 
 DmaObservation observe(void*, bool before) noexcept
-{ return observe_backend(before, true); }
-
-DmaObservation observe_rolling(void*, bool before) noexcept
-{ return observe_backend(before, false); }
+{ return observe_backend(before); }
 
 void acknowledge(void*, std::uint8_t flag) noexcept
 {
@@ -320,18 +274,6 @@ bool qualify_stm32_acquisition(Stm32AcquisitionQualification value) noexcept
 AcquisitionPort stm32_acquisition_port() noexcept
 {
     return {&context, prepare, arm_dma, start_trigger, stop_acquisition, observe, acknowledge};
-}
-
-AcquisitionPort stm32_rolling_port() noexcept
-{
-    return {&context, prepare_rolling, arm_dma_rolling, start_trigger,
-            stop_acquisition, observe_rolling, acknowledge};
-}
-
-AcquisitionPort stm32_oversampled_rolling_port() noexcept
-{
-    return {&context, prepare_oversampled_rolling, arm_dma_oversampled_rolling, start_trigger,
-            stop_acquisition, observe_rolling, acknowledge};
 }
 
 void stm32_acquisition_dma_irq() noexcept

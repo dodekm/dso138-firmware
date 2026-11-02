@@ -24,7 +24,7 @@ static_assert(offsetof(VoltageCalibration, gain_shift) == 9U);
 [[nodiscard]] bool code_to_microvolts(std::uint16_t code, VoltageCalibration calibration,
                                      std::int64_t& microvolts) noexcept;
 
-inline constexpr std::uint8_t ScopeTimebaseCount{24U};
+inline constexpr std::uint8_t ScopeTimebaseCount{18U};
 #if defined(DSO_PROJECTION_COLUMN_CAPACITY)
 inline constexpr std::uint16_t WaveformColumnCapacity{DSO_PROJECTION_COLUMN_CAPACITY};
 #else
@@ -32,17 +32,16 @@ inline constexpr std::uint16_t WaveformColumnCapacity{DisplayWidth};
 #endif
 static_assert(WaveformColumnCapacity >= 2U && WaveformColumnCapacity <= DisplayWidth,
               "Projection capacity must fit the LCD");
-// 10,20,50 us/div ... 100,200,500 s/div; invalid index returns0.
+// 10,20,50 us/div ... 1,2,5 s/div; invalid index returns0.
 [[nodiscard]] std::uint32_t scope_timebase_us(std::uint8_t index) noexcept;
-enum class ScopeTimebaseSupport : std::uint8_t { Invalid, CircularDma, NeedsSlowBackend, Rolling };
+enum class ScopeTimebaseSupport : std::uint8_t { Invalid, CircularDma };
 struct ScopeTimebasePlan final {
     TimebasePlan timing;
     ScopeTimebaseSupport support;
 };
-// Fixed current72MHz/12MHz7.5cycle profile; cap500k samples/s. PSC/ARR chosen
-// from exact requested full-screen duration and1024-point record. Slow settings
-// can be represented by TIM2 but are explicitly NOT supported by the current
-// DWT/half-ring monitor. Failure leaves out unchanged. Configuration-time only.
+// Fixed72MHz/12MHz7.5cycle profile; cap500k samples/s. All catalog entries
+// fit the supported circular-DMA backend. Failure leaves out unchanged.
+// Configuration-time only.
 [[nodiscard]] bool plan_scope_timebase(std::uint8_t index, ScopeTimebasePlan& out) noexcept;
 
 struct ProjectionSettings final {

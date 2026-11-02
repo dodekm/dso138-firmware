@@ -15,13 +15,16 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 | Area | Included functionality |
 | --- | --- |
 | Acquisition | Timer-triggered ADC with DMA; configured rate up to 500 kS/s |
-| Timebase | 24 settings from 10 µs/div to 500 s/div; filtered rolling view for slow settings |
+| Timebase | 18 settings from 10 µs/div to 5 s/div; triggered capture |
 | Controls | Auto, Normal and Single trigger, Run/Hold, trigger position, physical switches and four buttons |
 | Trigger indication | D3 flashes on accepted trigger crossings; see [Trigger LED behavior](docs/trigger-led.md) |
 | Measurements | Frequency, peak-to-peak, mean and RMS when valid for the capture |
+| Spectrum (unreleased) | Custom 512-point real FFT, periodic Hann window, peak-referenced dBFS and dominant positive-frequency bin |
 | Records | Save and recall waveforms and settings; independent calibration store |
 
 The unreleased revision uses one 2 KiB storage bank, leaving 62 KiB for application code. Reset or power loss during a save can lose the saved waveform, settings and calibration. Wait for completion before removing power. Records from the previous two-bank layout are not guaranteed to migrate; its lower bank becomes application space.
+
+The basic spectrum view is software-verified and builds in CubeIDE Release and Debug, with 3,776 bytes of application Flash headroom. Target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
 
 ## Quick start
 
