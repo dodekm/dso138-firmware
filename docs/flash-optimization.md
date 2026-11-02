@@ -287,3 +287,9 @@ The accepted configured image occupies 60,488 bytes and leaves 3,000 bytes for f
 Final comparison matched all 158 release source/dependency files under App, Inc, Src, Drivers and Startup against the tested configured tree after line-ending normalization, excluding only the deliberately private board-identity header. The repository passes diff whitespace checks and contains none of the private test or experimental files.
 
 The investigation covered the major linked contributors and the specific smaller opportunities supported by source/assembly evidence. Remaining experiments that trade runtime work or additional maintenance complexity for small savings were not accepted merely to lower a size number. This closes the software footprint investigation at the current verified configuration; different features, performance trade-offs or future toolchains require a new comparison.
+
+## Deployment — 2026-11-02
+
+The accepted 60,488-byte configured ELF was programmed through the owner-selected ST-Link at 50 kHz SWD after matching the MCU identity and 64 KiB device capacity. All 158 release source/dependency files matched the tested configured tree, apart from the private board-identity header. CubeProgrammer erased application pages 0–59 and reported successful download verification; the final 2 KiB storage pages were left untouched. No Flash backup was taken, as requested.
+
+After a separate software reset/run, non-resetting HOTPLUG reads confirmed startup stage 6, LCD ID 0x9341, running application phase and zero startup/power/display/application fault fields. The observed acquisition publication contained no captured frames or qualified physical generation, so this limited startup check is not an acquisition, waveform or performance qualification. Normal-mode reconnects disturbed startup and were replaced by HOTPLUG observation. Earlier statements about the board remaining on cab7e80 describe the preceding offline investigation.
