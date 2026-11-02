@@ -314,7 +314,7 @@ Vertical axis & Fixed 80 dB span from +10 to -70 dBFS, at 10 dB/div. The 0 dBFS 
 \bottomrule
 \end{tabularx}
 
-dBFS uses a peak reference of 2048 ADC codes: 0 dBFS corresponds to a 2048-code sinusoidal peak in the input-code scale. It is not a voltage reading, and the Spectrum view does not use the installed voltage calibration. Length, window, frequency span and vertical scale are fixed.
+dBFS uses a peak reference of 2048 ADC codes: 0 dBFS corresponds to a 2048-code sinusoidal peak in the input-code scale. It is not a voltage reading, and the Spectrum view does not use the installed voltage calibration. FFT length, window and vertical scale are fixed. The horizontal axis always shows the full Nyquist span for the captured sample rate; changing the acquisition timebase can change that span.
 
 Nyquist is the highest frequency represented without folding for the sampled block. Higher-frequency energy can alias into the displayed band and appear as a plausible lower-frequency peak; the Hann window does not prevent aliasing. Use suitable analog bandwidth limits ahead of the ADC when the signal may contain energy above Nyquist. ADC clipping can create harmonics that look like real signal components. Spectrum view has no clipping warning; check the same record in Scope view for its ADC clipping status.
 
@@ -376,8 +376,8 @@ Screen status or symptom & What to do \\
 No trace or an empty plot & Choose AUTO, return to RUN and wait for a record. Set vertical and horizontal position to zero; a panned or zoomed held view can lie outside the captured data. \\
 \lcd{WAIT INPUT}, \lcd{Switches settling} & Check the physical slide-switch positions and allow them to settle. \\
 \lcd{WAIT TRIG} & In Normal or Single, check that the input crosses the selected trigger level and edge. \\
-\lcd{FFT NEEDS FROZEN FRAME} & Complete a capture and hold it before selecting Spectrum. \\
-\lcd{FFT NEEDS HELD UNIFORM BLOCK}, \lcd{FFT NEEDS 512 SAMPLES} & Hold a complete record with at least 512 uniformly timed samples. \\
+\lcd{FFT NEEDS FROZEN FRAME} & In RUN, wait for a complete capture; check the trigger if it is waiting. A held or recalled record also works. \\
+\lcd{FFT NEEDS HELD UNIFORM BLOCK}, \lcd{FFT NEEDS 512 SAMPLES} & Wait for capture to finish, or use a held record with at least 512 uniformly timed samples. \\
 \lcd{FFT TIMING UNKNOWN} & Select a timebase with a valid timer plan, then acquire a fresh record. \\
 \lcd{Peak \char45\kern0pt\char45} & The mean-removed block has no nonzero positive-frequency bin. A DC-only input is removed before analysis. \\
 \lcd{\char45\kern0pt\char45\ CYCLES} & Select a wider time span so more periods fit in the fixed record. For the onboard signal, try 1 ms/div. \\
@@ -411,7 +411,7 @@ This firmware supports 18 triggered settings from 10\,$\mu$s/div to 5\,s/div. Th
 \textbf{Voltage and probe limits.} Nominal range labels and \lcd{NOM} conversion use board coefficients; they are not a production calibration. \lcd{CAL} indicates a measured profile is installed, but does not replace independent verification. \lcd{RAW} provides codes, not input volts. No probe attenuation is selected by firmware; multiply displayed input estimates by the probe factor when applicable. Do not treat the onboard signal as an absolute reference. No maximum safe input is specified here: follow the board's own input markings and limits.
 
 \begin{manualnote}{Firmware identity and qualification}
-The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks; 1.0.1 has not been flashed or tested on hardware. The current unreleased source revision changes saved-data layout to a single flash bank and adds a software FFT display; these changes have not been flashed or tested on hardware. This change does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, FFT analog accuracy, alias response and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
+The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks. Those checks and earlier hardware observations do not qualify the current spectrum revision. The current unreleased source revision changes saved-data layout to a single flash bank and adds a software FFT display; these changes have not been flashed or tested on hardware. This change does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, FFT analog accuracy, alias response and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
 \end{manualnote}
 
 \vfill
