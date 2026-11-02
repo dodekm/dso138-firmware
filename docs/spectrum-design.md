@@ -72,7 +72,7 @@ The spectrum view must identify N, window, mean/DC policy, actual frequency span
 Private tests, numerical reference implementations, transient firmware and research working files remain outside the release repository. Passing compilation or a single sinusoid is insufficient for a stage to be complete. The overall spectrum extension remains active until the complete pipeline, interface and documented verification gates are satisfied.
 
 
-## Current-source software verification â€” 2026-11-02
+## Current-source software verification - 2026-11-02
 
 A final focused run uses the FFT/spectrum sources from revision `4b8afb3`, with fresh native compilation rather than earlier executables or mixed-version headers. Tests and their source/hash manifest remain private, outside the release repository.
 
