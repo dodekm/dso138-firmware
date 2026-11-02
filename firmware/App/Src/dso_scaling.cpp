@@ -1,6 +1,7 @@
 #include "dso_scaling.hpp"
 #include "dso_timebase_presets.hpp"
 #include "dso_voltage_math.hpp"
+#include "dso_fixed_ratio.hpp"
 #include <algorithm>
 
 namespace dso {
@@ -34,38 +35,6 @@ static_assert(ScopeTimebaseCount == 18U && DmaHalfSamples == 512U &&
               "Timer presets require the current fixed capture profile");
 constexpr std::int32_t MaximumZero{4095 * 65536};
 
-struct Quotient final { std::uint64_t whole; std::uint64_t remainder; };
-
-// Exact(a*b)/d without a128-bit product. The checked product handles common
-// viewport ratios directly; wide products use a bounded32-step remainder loop.
-// Callers bound the final quotient and denominator; addition stays below2*d.
-static_assert(WaveformColumnCapacity <= UINT32_MAX / 1000000U,
-              "sample-position width multiplier must fit uint32");
-
-Quotient mul_div_width(std::uint64_t a, std::uint32_t b, std::uint64_t d) noexcept
-{
-    // In sample_position_x, b = width * 1,000,000, at most 320,000,000.
-    // Its 32-bit bound permits a 32-step exact fractional quotient.
-    if (b == 0U || a <= UINT64_MAX / b) {
-        const auto product = a * b;
-        return {product / d,product % d};
-    }
-    const auto integral = a / d;
-    const auto fractional = a % d;
-    std::uint32_t quotient{};
-    std::uint64_t remainder{};
-    for (unsigned bit = 32U; bit > 0U; --bit) {
-        quotient *= 2U;
-        remainder *= 2U;
-        if (remainder >= d) { remainder -= d; quotient++; }
-        if ((b & (std::uint32_t{1U} << (bit - 1U))) != 0U) {
-            remainder += fractional;
-            if (remainder >= d) { remainder -= d; quotient++; }
-        }
-    }
-    return {integral * b + quotient, remainder};
-}
-
 bool settings_valid(const FrameMetadata& metadata, const ProjectionSettings& view) noexcept
 {
     const auto& timing = metadata.timing;
@@ -98,10 +67,12 @@ std::int64_t sample_position_x(std::uint16_t index, std::uint16_t pretrigger,
 {
     const auto delta = std::int64_t{index} - pretrigger - view.horizontal_offset_samples;
     const auto magnitude = static_cast<std::uint64_t>(delta < 0 ? -delta : delta);
-    const auto q = mul_div_width(magnitude * divider,
-                           std::uint32_t{view.width} * 1000000U,
-                           std::uint64_t{timer_hz} * view.time_us_per_div * 10U);
-    const auto offset = static_cast<std::int64_t>(q.whole +
+    // Valid capture/pan bounds give magnitude <= 2047 and width <= 320;
+    // this unscaled product fits uint64_t even at the largest divider.
+    const auto numerator = magnitude * divider * view.width;
+    const auto q = detail::million_ratio(numerator,
+        std::uint64_t{timer_hz} * view.time_us_per_div * 10U);
+    const auto offset = static_cast<std::int64_t>(q.quotient +
         (delta < 0 && q.remainder != 0U ? 1U : 0U));
     const auto trigger = std::uint32_t{view.trigger_position_permille} * view.width / 1000U;
     return std::int64_t{trigger} + (delta < 0 ? -offset : offset);

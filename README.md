@@ -24,7 +24,7 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 
 The unreleased revision uses one 2 KiB storage bank, leaving 62 KiB for application code. Reset or power loss during a save can lose the saved waveform, settings and calibration. Wait for completion before removing power. Records from the previous two-bank layout are not guaranteed to migrate; its lower bank becomes application space.
 
-The basic spectrum view is software-verified and builds in CubeIDE Release and Debug, with 3,776 bytes of application Flash headroom. Target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
+The basic spectrum view is software-verified and builds in CubeIDE Release and Debug, with 3,872 bytes of application Flash headroom. Target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
 
 ## Quick start
 

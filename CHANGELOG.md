@@ -3,9 +3,10 @@
 ## Unreleased — Basic FFT, Flash headroom and single-bank storage
 
 - Add an independently developed fixed-point real FFT and a fixed 512-point, mean-removed, periodic-Hann spectrum view. It uses the frozen record's actual timer rate, ADC peak-referenced dBFS, a fixed +10 to -70 dBFS plot and a strongest positive-frequency-bin readout without interpolation.
+- Share exact scaled-ratio arithmetic between waveform projection and frequency measurement, recovering 96 bytes of Flash with unchanged numerical results. The normal projection path remains inline.
 - Add a session-only Domain selector while preserving the scope controls and raw waveform/settings storage format. Scope and Spectrum share focus/action formatting; Save, Recall and Calibration remain visible in either domain.
 - Reuse the stopped DMA workspace through explicit C++ object-lifetime transitions. No second transform buffer, dynamic allocation, runtime trigonometry, floating-point dependency or imported FFT implementation is added.
-- Update the LaTeX/PDF manual to revision 1.3. The configured software image occupies 59,712 bytes, leaving 3,776 bytes free. New FFT hardware timing and deployment remain unverified.
+- Update the LaTeX/PDF manual to revision 1.3. The configured software image occupies 59,616 bytes, leaving 3,872 bytes free. New FFT hardware timing and deployment remain unverified.
 
 - Reserve 2 KiB instead of 4 KiB for saved records, increasing the application region to 62 KiB.
 - Remove the six 10–500 s/div timebases and their slow rolling, oversampling, and FIR-filtered acquisition backend. The active catalogue now spans 10 µs/div through 5 s/div. Saved records with removed timebase indices are rejected rather than mapped onto a different setting; users can explicitly save a supported replacement.

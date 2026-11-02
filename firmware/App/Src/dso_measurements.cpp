@@ -1,5 +1,6 @@
 #include "dso_measurements.hpp"
 #include "dso_voltage_math.hpp"
+#include "dso_fixed_ratio.hpp"
 
 namespace dso {
 namespace {
@@ -11,39 +12,11 @@ static_assert(std::uint64_t{AdcMax} * AdcMax * Q32 + 2U < (std::uint64_t{1U} << 
 std::uint64_t frequency_rates(std::uint64_t numerator, std::uint64_t denominator,
                               std::uint64_t& millihertz) noexcept
 {
-    constexpr std::uint64_t Scale{1000000U};
-    static_assert(Scale <= UINT32_MAX, "fractional frequency quotient must fit uint32_t");
-    if (numerator <= UINT64_MAX / Scale) {
-        const auto product = numerator * Scale;
-        const auto quotient = product / denominator;
-        const auto remainder = product % denominator;
-        // Use the unrounded microhertz quotient: rounding it first can move a
-        // value just below a millihertz half-step onto the wrong side of it.
-        millihertz = (quotient + 500U) / 1000U;
-        return quotient + (remainder >= (denominator + 1U) / 2U ? 1U : 0U);
-    }
-    // Exact scaled ratio without a128-bit product. Numerator<=4.83e15 and
-    // denominator<=2.88e17. The fractional multiply has exactly20 iterations,
-    // remainder<denominator and all additions<2*denominator<2^64. The final
-    // quotient is at most36e12uHz under the minimum2-sample-period policy.
-    const auto whole = numerator / denominator;
-    const auto fractional = numerator % denominator;
-    // Each processed prefix is <=Scale; fractional < denominator makes its
-    // quotient floor(fractional * prefix / denominator) strictly less than
-    // that prefix, so every intermediate fits uint32_t.
-    std::uint32_t fractional_quotient{};
-    std::uint64_t remainder{};
-    for (unsigned bit{20U}; bit != 0U; --bit) {
-        fractional_quotient *= 2U; remainder *= 2U;
-        if (remainder >= denominator) { remainder -= denominator; ++fractional_quotient; }
-        if ((Scale & (std::uint64_t{1U} << (bit - 1U))) != 0U) {
-            remainder += fractional;
-            if (remainder >= denominator) { remainder -= denominator; ++fractional_quotient; }
-        }
-    }
-    const std::uint64_t quotient = whole * Scale + fractional_quotient;
-    millihertz = (quotient + 500U) / 1000U;
-    return quotient + (remainder >= (denominator + 1U) / 2U ? 1U : 0U);
+    const auto ratio = detail::million_ratio(numerator, denominator);
+    // Use the unrounded microhertz quotient: rounding it first can move a
+    // value just below a millihertz half-step onto the wrong side of it.
+    millihertz = (ratio.quotient + 500U) / 1000U;
+    return ratio.quotient + (ratio.remainder >= (denominator + 1U) / 2U ? 1U : 0U);
 }
 
 std::uint64_t rational_q32(std::uint64_t numerator, std::uint64_t denominator) noexcept
