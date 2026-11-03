@@ -2,7 +2,7 @@
 
 C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HAL for the STM32F103C8T6 in STM32CubeIDE. This repository provides the application source, CubeIDE project, and practical documentation for owners and developers.
 
-[User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
+[User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Release readiness](docs/release-readiness.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
 USB waveform export is an opt-in stock-board experiment. The ordinary build keeps it off. See [USB setup and test status](docs/usb-hardware.md), the [waveform protocol](docs/usb-protocol.md), and the [MATLAB client instructions](host/matlab/README.md).
 
@@ -21,17 +21,17 @@ USB waveform export is an opt-in stock-board experiment. The ordinary build keep
 | Controls | Auto, Normal and Single trigger, Run/Hold, trigger position, physical switches and four buttons |
 | Trigger indication | D3 flashes on accepted trigger crossings; see [Trigger LED behavior](docs/trigger-led.md) |
 | Measurements | Frequency and absolute peak focus-line readings; peak-to-peak on Amplitude; total RMS and mean on RMS/Mean; raw ADC counts when voltage conversion is unavailable |
-| Spectrum (unreleased) | Custom 512-point real FFT, periodic Hann window, peak-referenced dBFS and dominant positive-frequency bin |
+| Spectrum (experimental) | Software-verified 512-point real FFT, periodic Hann window, peak-referenced dBFS and dominant positive-frequency bin; target timing remains unverified |
 | USB waveform export (opt-in experiment) | Verified CDC held-frame reads and host-requested Single captures on the reference board. See test results and bench limits above. |
 | Storage (opt-in) | Save/load scope settings and save/restore DC calibration; waveform persistence is removed |
 
 The current storage profile reserves one 1 KiB Flash page at `0x0800FC00–0x0800FFFF` and gives the application 63 KiB. It stores scope settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved settings or calibration. CRC validation remains enabled.
 
-The compact storage record uses at most 272 bytes (32-byte journal envelope and up to 240 bytes of settings plus DC calibration). The USB trial was measured at 64,456 bytes in its 64,512-byte application region, leaving 56 bytes; the ordinary public profile remains USB-off. Host enumeration, held-frame transfers, host-requested Single captures, cancellation, timeout and three automatic restart checks were verified on the reference board. Electrical compliance and gap-free acquisition are not qualified. See [Build results](docs/building.md) for software resource measurements. The spectrum view is software-verified; current target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
+The compact storage record uses at most 272 bytes (32-byte journal envelope and up to 240 bytes of settings plus DC calibration). The deployed R5 USB trial occupies 64,456 bytes of its 64,512-byte application region, leaving 56 bytes; the ordinary public profile remains USB-off. A fully configured, clean-copy-verified but unflashed R6 USB-trial software image is 64,408 bytes (104 bytes free) and does not change the deployed R5 image. Host enumeration, held-frame transfers, host-requested Single captures, cancellation, timeout and three automatic restart checks were verified on the reference board. Electrical compliance and gap-free acquisition are not qualified. See [Build results](docs/building.md) and [Release readiness](docs/release-readiness.md) for software resource measurements. The spectrum view is software-verified; current target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
 
 ## Quick start
 
-1. Read [Getting started](docs/getting-started.md): identify the board, set its MCU UID and identity, and make a complete Flash backup.
+1. Read [Getting started](docs/getting-started.md): identify the board, set its MCU UID and identity, and preserve the final settings/calibration Flash page when programming.
 2. Follow [Building](docs/building.md) to import `firmware/` as an existing STM32CubeIDE project and build the Release configuration.
 3. Review [Compatibility](docs/compatibility.md) before using another board revision. For common startup and signal issues, see [Troubleshooting](docs/troubleshooting.md).
 

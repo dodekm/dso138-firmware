@@ -1,5 +1,5 @@
 /* Terminal Cortex-M3 exception containment. No stack, calls, HAL or return.
- * See docs/fault-review.md for PM0056/RM0008 evidence and physical limits.
+ * PM0056/RM0008 define exception/register behavior; see docs/architecture.md for limits.
  */
 #include "../Inc/dso_cpu_fault.h"
 .syntax unified

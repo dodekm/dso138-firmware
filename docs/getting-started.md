@@ -18,15 +18,15 @@ Read the MCU's 96-bit unique device ID with STM32CubeProgrammer's device informa
 
 Use the exact values from your MCU. Do not remove or bypass the identity, MCU-type, Flash-size or display-controller guards. The firmware expects device ID `0x410`, 64 KiB Flash and ILI9341 (`0x9341`); mismatches must prevent activation. This is per-device configuration, not universal identity provisioning.
 
-## 4. Build, back up and program
+## 4. Build and program
 
 1. Follow [Building](building.md) to build the Release ELF for your configured UID.
 2. Connect SWDIO, SWCLK, GND and target reference voltage. Keep the board on its normal supply; the programmer's 3.3 V output is not analog-board power.
-3. In STM32CubeProgrammer, connect over **SWD**, save a backup of the complete 64 KiB Flash contents, and record option-byte settings before changing anything.
+3. In STM32CubeProgrammer, connect over **SWD** and verify the detected MCU type and 64 KiB Flash capacity. Do not change option bytes.
 4. Program `firmware/Release/dso138.elf` through CubeProgrammer and perform a readback comparison.
-5. Preserve the final 1 KiB Flash page (`0x0800FC00–0x0800FFFF`) if you want to keep saved settings or calibration. Avoid full-chip erase as a default; it erases the page as well as the application.
+5. Preserve the final 1 KiB Flash page (`0x0800FC00–0x0800FFFF`) to keep saved settings or calibration. Avoid full-chip erase; it erases the page as well as the application.
 6. Disconnect SWD and power the instrument normally. Check startup, display and controls before connecting a signal.
 
 Build separately for each MCU; an image made with your UID is not a universal image. The [user manual (PDF)](manual/dso138-user-manual.pdf) and [editable LaTeX source](manual/dso138-user-manual.tex) cover the controls and operation.
 
-Storage retains settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved data. Public USB remains disabled and unqualified.
+Storage retains settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved data. USB is disabled in the ordinary source profile. The opt-in stock-board experiment is not electrically production-qualified; see [USB hardware limits](usb-hardware.md).

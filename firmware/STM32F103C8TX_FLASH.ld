@@ -94,14 +94,13 @@ SECTIONS
     PROVIDE_HIDDEN(__init_array_end = .);
   } > FLASH
 
-  .fini_array (READONLY) :
+  /* Bare-metal application never returns from main or calls exit/fini; retain
+     constructors above, but discard unused process-shutdown finalizer tables. */
+  /DISCARD/ :
   {
-    . = ALIGN(4);
-    PROVIDE_HIDDEN(__fini_array_start = .);
-    KEEP(*(SORT(.fini_array.*)))
-    KEEP(*(.fini_array))
-    PROVIDE_HIDDEN(__fini_array_end = .);
-  } > FLASH
+    *(.fini_array .fini_array.*)
+    *(.dtors .dtors.*)
+  }
 
   _sidata = LOADADDR(.data);
   .data :

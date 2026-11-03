@@ -6,7 +6,7 @@ A blank screen is expected while the public source still contains zero UID words
 
 ## Blank display after identity configuration
 
-Confirm the board is PCB 109-13800-00C with an ILI9341 display and matching STM32F103 device/64 KiB Flash. Check normal instrument power and shared SWD ground; the programmer's 3.3 V reference alone does not power the analog front end. Review SWD wiring and restore the original full Flash backup if programming did not complete cleanly.
+Confirm the board is PCB 109-13800-00C with an ILI9341 display and matching STM32F103 device/64 KiB Flash. Check normal instrument power and shared SWD ground; the programmer's 3.3 V reference alone does not power the analog front end. If programming verification fails, do not power up the instrument or erase the chip as a first response; preserve the storage page and diagnose the SWD/readback issue.
 
 ## Build errors
 
@@ -18,10 +18,10 @@ Check probe and ground connections, input coupling and sensitivity switches, tri
 
 ## Trigger LED stays off or appears continuously lit
 
-D3 is an activity cue for accepted trigger crossings. It stays off when there is no newly accepted edge, during Auto free-run timeout, recall/HOLD redraw, or a startup/application fault. Closely spaced crossings can keep it apparently lit without a visible gap. See [Trigger LED behavior](trigger-led.md). This feature has not been tested on flashed hardware, and its pulse is not a precise trigger timing reference.
+D3 is an activity cue for accepted trigger crossings. It stays off when there is no newly accepted edge, during Auto free-run timeout, held-waveform redraw, or a startup/application fault. Closely spaced crossings can keep it apparently lit without a visible gap. The operator confirmed it working on the reference instrument, but its pulse timing is not instrument-measured. See [Trigger LED behavior](trigger-led.md).
 
 ## Unexpected readings or saved records
 
-Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 2 KiB of Flash stores the persistent journal; back up the full device before recovery and avoid full-chip erase if you want to keep settings or waveforms.
+Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 1 KiB of Flash stores scope settings and DC calibration. Waveform save/recall is not available. Avoid erasing the storage page if you need to retain those settings and calibration.
 
 The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.

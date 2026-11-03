@@ -168,6 +168,9 @@ classdef DsoUsbClient < handle
             started = tic;
             while toc(started) < maxWaitSeconds
                 remaining = maxWaitSeconds - toc(started);
+                if remaining <= 0
+                    break
+                end
                 statusReply = obj.command(uint8(2), DsoUsbClient.bytes32(expectedJob), min(remaining, 0.25));
                 p = obj.captureStatusPayload(statusReply, expectedJob);
                 readyStatus = p;

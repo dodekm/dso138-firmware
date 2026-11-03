@@ -1,5 +1,7 @@
 # Flash optimization investigation
 
+**Historical engineering log.** This file records experiments at several earlier commits, including the former 2 KiB storage layout, waveform persistence/recall and the 59,440-byte application image. Those configurations and their RAM, stack, save/recall and hardware-status statements are not the accepted R5 baseline. Use [release readiness](release-readiness.md) for current policy and open gates; retain this document only as version-specific history.
+
 ## Baseline
 
 The starting point is v1.0.1, commit `e5726c6292fb49093e6178c31a536faac4f8ef29`, built for the reference board with STM32CubeIDE 2.2.0 and GNU Tools for STM32 14.3.rel1. These numbers come from the configured Release ELF, not the zero-UID public configuration. Its load span is 61,280 bytes of the 61,440-byte application region, leaving 160 bytes. The final 4 KiB of the 64 KiB device is reserved for the settings journal.
@@ -317,7 +319,7 @@ Fresh STM32CubeIDE imports build Release and Debug with all 39 current C++ sourc
 
 An exact-image call-graph rebuild adds analysis metadata but produces the identical 59,712-byte runtime binary (SHA-256 8DBEDCF006713668EB3D785EBCFE0EEEFE251E9AD10D83B65ED47CE7F804CCBD). Its maximum callback-expanded foreground path is 1,348 bytes. All 46 reachable indirect sites are bound to the configured callbacks, with no unresolved reachable sites or recursion. A conservative 212-byte IRQ/software/hardware-frame allowance gives a 1,560-byte bound. Against the actual 2,048-byte minimum stack this leaves 488 bytes; the four alignment bytes are not usable stack.
 
-The LaTeX/PDF manual is revision 1.3, with 12 rendered A4 pages reviewed. Simulated images come from the real controller, renderer and LCD/GRAM command path with synthetic inputs; they are not physical captures. No FFT image has been flashed or timed. CubeProgrammer currently reports no ST-Link, so hardware qualification remains pending. Earlier physical observations in this report apply to their named older images.
+At the time of this 2026-11-02 report, the LaTeX/PDF manual was revision 1.3 with 12 rendered A4 pages reviewed. Simulated images came from the real controller, renderer and LCD/GRAM command path with synthetic inputs; they were not physical captures. No FFT image had yet been flashed or timed, and CubeProgrammer did not detect the selected ST-Link in that session. R5 was deployed later for USB restart/capture checks, which do not qualify FFT behavior. Earlier physical observations in this report apply to their named older images.
 
 
 ## Shared exact ratio — 2026-11-02

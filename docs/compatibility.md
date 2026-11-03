@@ -14,4 +14,4 @@ The ADC's configured rate (up to 500 kS/s) does not guarantee analog bandwidth, 
 
 ## Board-specific analog settings
 
-Gain and zero parameters may differ between physical boards. If adjusting them, measure the specific instrument against a suitable reference, record the method, and retain the original Flash backup. Do not change the device identity or hardware guards to make an unchecked variant boot.
+Gain and zero parameters may differ between physical boards. If adjusting them, measure the specific instrument against a suitable reference and record the method and prior calibration values. Do not change the device identity or hardware guards to make an unchecked variant boot. Preserve the final 1 KiB settings/calibration page during programming if those values must be retained.
