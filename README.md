@@ -15,10 +15,6 @@ from successive captures, measurements, FFT and export. See the
 [USB setup](docs/usb-hardware.md) and
 [protocol](docs/usb-protocol.md) for the supported hardware and commands.
 
-![Illustrative DSO138 screen preview](docs/screen-preview.svg)
-
-*Illustrative interface artwork, not a device screenshot or measured trace.*
-
 > **Before flashing:** the reference hardware is PCB **109-13800-00C**, **STM32F103C8T6** and **ILI9341**. Configure your own MCU identity using [Getting started](docs/getting-started.md). Other variants are unverified, and nominal readings require individual calibration.
 
 ## Features
