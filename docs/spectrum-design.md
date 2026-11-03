@@ -1,6 +1,6 @@
 # Spectrum analyzer engineering record
 
-This is the dated FFT design and software-verification record. The current firmware source contains the integrated Spectrum mode. R5 USB restart and capture tests do not verify FFT target runtime, visible output on hardware, or acquisition impact; those gates remain open in [release readiness](release-readiness.md).
+This document records the design and verification of the integrated Spectrum mode. The R6 bench results below cover target execution, display presentation, and acquisition during USB traffic.
 
 ## Scope revision
 
@@ -10,7 +10,7 @@ The user requested basic FFT functionality and prioritized Flash use, then reque
 
 Preserve the remaining time-domain controls, triggering, configured fast acquisition, measurements, calibration, settings/calibration storage and rendering. Implement an independently derived C++ FFT; no existing FFT implementation is a production dependency. No dynamic allocation, runtime trigonometry, RTOS, Cortex-M4 DSP instructions or hardware floating-point assumptions are introduced.
 
-Historical FFT feasibility measurements at the earlier 2 KiB storage layout are not current resource figures. The R5 opt-in stock-trial image is recorded at 64,456 bytes in a 64,512-byte application region, with 56 bytes free. Its build accounting is 112 bytes `.data`, 13,192 bytes `.bss`, 2,048 bytes reserved stack and 5,128 bytes unallocated SRAM; heap use is zero. Fresh Release/Debug builds and the offline USB-inclusive stack model now pass; the 2 KiB reservation is not measured stack high-water and a target watermark remains unmeasured. See [release readiness](release-readiness.md).
+The deployed R6 USB bench image uses 64,408 bytes of the 64,512-byte application region and leaves 104 bytes. The same build reserves 2,048 bytes of stack. For build accounting and the distinction between stack analysis and observed usage, see [release verification](release-readiness.md).
 
 The current 500 ksample/s cap, ADC settings, timers, DMA and interrupt ownership remain unchanged. Hardware sampling continues independently within an acquisition record. The existing instrument intentionally stops after a completed record and rearms only after processing and presentation; it is not a continuous recorder. Spectrum processing belongs in that same stopped-producer interval. Spectrum RUN must still acquire repeated records, and HOLD must preserve a record for analysis.
 
@@ -60,17 +60,12 @@ The spectrum view must identify N, window, mean/DC policy, actual frequency span
 
 | Stage | Required evidence | Current state |
 | --- | --- | --- |
-| Research and feasibility | Primary documentation, hardware budgets, independent normalization and ownership design | Recorded; length/numeric alternatives compared. |
-| Custom transform | Direct DFT, endpoints, full-range/random input, cancellation and overflow bounds | The historical 4b8afb3 run passed its documented 2,316-bin comparison; the fresh current-source result is recorded below. Cancellation and overflow behavior still require current integrated regression evidence. |
-| Workspace | Explicit lifetime/ownership, denied overlaps, unchanged held samples, failed-stop rejection | Fresh W4/WX/ASan controller tests passed 200 FFT lifecycle cycles, leases/replay and wrap/session/deadline validation. Integrated hardware buffer preservation and acquisition timing still require target checks. |
-| Spectral processing | Hann gain, endpoints, dB reference/floor, peak and projection | Nine fresh current-source DC/low-amplitude/noise/Nyquist vectors passed peak, dB and projection checks; target timing and integrated behavior remain pending. |
-| Integration | Fresh IDE builds, SRAM/stack bounds and regressions | Fresh configured Release/Debug builds pass with zero ARM-source warnings and identical R5 images. The enumerated static stack model is 1,508 bytes; the engineering budget is 1,544/2,048 bytes with 504 bytes budget margin after one extra 36-byte exception-frame allowance. No on-device watermark is available. |
-| Display and usability | Actual renderer/GRAM output, axes, invalidation and visible controls | Native controller/CDC fake suite covers 200 FFT cycles and endpoint-register write combinations; the spectrum's physical output and target timing remain unverified. Waveform Save/Recall is not part of the current feature set. |
-| Hardware benchmarks | R5 restart/capture checks, FFT timing and recovery | R5 passed bounded USB restart and capture checks. DWT FFT slices and repeated capture/display impact remain pending; USB checks do not qualify the spectrum path. |
-| Delivery | User guide, manual, build instructions, project configuration and limits | Manual 1.8 is 13 A4 pages and render-checked. Regeneration from `.ioc` remains unsupported; final build and release review are open. |
+| Fixed-point transform | 2,316 independent DFT comparisons and nine analyzer edge cases | Pass for the reported vector sets. |
+| Workspace and controller | 200 acquire/FFT/render/rearm cycles in native tests, leases and cancellation | Pass in the exercised cases. A target held-record comparison also passed across Scope/Spectrum transitions. |
+| Target integration | DFT of the live capture slice, timed presentation and acquisition under CDC load | Pass for the reference setup described below. |
+| Delivery | Reproducible configured builds, documented `.ioc` exception, manual and upgrade notes | See [release verification](release-readiness.md). |
 
-Private tests, numerical reference implementations, transient firmware and research working files remain outside the release repository. Passing compilation or a single sinusoid is insufficient for a stage to be complete. The overall spectrum extension remains active until the complete pipeline, interface and documented verification gates are satisfied.
-
+Private tests, reference calculations and engineering artifacts remain outside the release repository.
 
 ## Current-source numerical verification - 2026-11-03
 
@@ -86,4 +81,10 @@ The following focused software run used the FFT/spectrum sources from revision `
 - The analyzer is checked with constant DC, one-code alternation, low-level noise, 1/2/4/16-code tones, full ADC alternation and a near-full-scale tone. Peak bin and level are compared with an independent periodic-Hann DFT. All 280 projection columns must be valid and stay within rows 0-175; this check establishes bounds, not a pixel-by-pixel DFT rendering comparison. Full-scale patterns report approximately 0 dBFS; zero input has no peak.
 - The current controller, acquisition and GRAM/display fixture completes 200 repeated Single-mode acquire/analyze/render/rearm cycles with Scope/Spectrum transitions, finite test deadlines, successful new records and no controller fault. A separate continuous RUN check completes 20 successive rendered spectra in Auto and 20 in Normal with no intervening button presses, requiring advancing acquisition epochs, completed renders and no controller fault. Sample checks across FFT processing remain unchanged. A RUN action during an active workspace lease returns the buffer before immediate producer restart. A panel-invalid update during analysis and subsequent valid-tuple restoration leave the held record usable and processing safe. This is simulated producer/display evidence, not a sustained physical acquisition test.
 
-The software checks do not substitute for the remaining target gate. The R5 image has been programmed and its bounded USB restart/capture behavior has been observed, but those tests did not measure FFT DWT processing slices, visible spectrum output under repeated acquisition, or acquisition/display interference. The deployed R5 image and the source-default release profile also differ in board identity and USB configuration; do not publish an identity-bound bench binary. The onboard test output can establish functional integration; it cannot establish calibrated analog spectral accuracy or front-end response.
+## R6 target observations - 2026-11-03
+
+The configured 500 kS/s capture contained 1,024 valid 12-bit codes. MATLAB exports in Scope, Spectrum and returned Scope matched for every sample and all 16 frozen metadata fields. The analyzer used the 512-sample slice starting at index 255. Its dominant bin was 1 (976.56 Hz from configured timer metadata) at −12.11 dBFS, within 0.0022 dB of the independent DFT for that exact slice. The observed DWT interval from the Spectrum request to completed LCD presentation was 64,818,589 cycles (about 0.90 s at 72 MHz), inclusive of rendering and debugger polling. This is a domain-change observation. Isolated FFT latency and physical LCD pixels were not measured.
+
+In successive four-second RUN windows with 7,399 Scope and 8,694 Spectrum USB status replies, the acquisition produced 66 and 68 records respectively, with no recorded acquisition, transport, controller or panel faults. The largest observed poll gap was 53,764 cycles against the configured 69,631-cycle budget. The record rate reflects the tested signal, settings, foreground work and display. It does not establish continuous capture, externally measured timing or spectral accuracy.
+
+A separate watchpoint test entered HOLD at the stopped producer's presentation boundary. It requested Scope again after the FFT acquired the workspace. The firmware cancelled the FFT, released the workspace, restored the Scope projection and preserved the held raw record and frozen metadata.

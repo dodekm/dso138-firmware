@@ -10,7 +10,7 @@ The `.ioc` reference records PA15 as `TRIGGER_LED`, initially HIGH. Runtime acqu
 
 ## When it lights
 
-Each newly accepted trigger crossing starts or restarts a 100 ms pulse serviced in the foreground without waiting for display refresh. Each acquisition engine latches a pending event until the application consumes it. These flags survive rearming, are consumed together even during a fault, and coalesce multiple crossings between service calls into one indication. Replayed frames or switching acquisition modes do not invent an event.
+Each newly accepted trigger crossing starts or restarts a 100 ms pulse serviced in the foreground without waiting for display refresh. Acquisition latches a pending event across rearm until the application consumes it. Multiple crossings between service calls coalesce into one indication. The foreground discards events while the controller is faulted.
 
 - Eligible actual trigger edges in Auto, Normal, or Single can light D3.
 - Single's pulse is allowed to finish while the instrument enters automatic HOLD.

@@ -24,4 +24,4 @@ D3 is an activity cue for accepted trigger crossings. It stays off when there is
 
 Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 1 KiB of Flash stores scope settings and DC calibration. Waveform save/recall is not available. Avoid erasing the storage page if you need to retain those settings and calibration.
 
-The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.
+The single-page storage format can lose previously saved data if reset or power fails during a save. Version 2 uses the old lower storage bank as application space. See the [upgrade notes](getting-started.md#upgrade-notes) before programming over version 1.

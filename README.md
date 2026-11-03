@@ -4,7 +4,7 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 
 [User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Release readiness](docs/release-readiness.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
-Planning an update? Read the [v2 candidate upgrade notes](docs/getting-started.md#upgrade-notes) first. The latest published release remains v1.0.1; this source branch is still an unreleased candidate.
+Upgrading to v2.0.0? Review the changes to storage, timebases and measurement readouts in the [upgrade notes](docs/getting-started.md#upgrade-notes).
 
 USB waveform export is an opt-in stock-board experiment. The ordinary build keeps it off. See [USB setup and test status](docs/usb-hardware.md), the [waveform protocol](docs/usb-protocol.md), and the [MATLAB client instructions](host/matlab/README.md).
 
@@ -23,13 +23,15 @@ USB waveform export is an opt-in stock-board experiment. The ordinary build keep
 | Controls | Auto, Normal and Single trigger, Run/Hold, trigger position, physical switches and four buttons |
 | Trigger indication | D3 flashes on accepted trigger crossings; see [Trigger LED behavior](docs/trigger-led.md) |
 | Measurements | Frequency and absolute peak focus-line readings; peak-to-peak on Amplitude; total RMS and mean on RMS/Mean; raw ADC counts when voltage conversion is unavailable |
-| Spectrum (experimental) | Software-verified 512-point real FFT, periodic Hann window, peak-referenced dBFS and dominant positive-frequency bin; target timing remains unverified |
+| Spectrum | 512-point real FFT with a periodic Hann window, peak-referenced dBFS and a dominant positive-frequency bin |
 | USB waveform export (opt-in experiment) | Verified CDC held-frame reads and host-requested Single captures on the reference board. See test results and bench limits above. |
 | Storage (opt-in) | Save/load scope settings and save/restore DC calibration; waveform persistence is removed |
 
 The current storage profile reserves one 1 KiB Flash page at `0x0800FC00–0x0800FFFF` and gives the application 63 KiB. It stores scope settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved settings or calibration. CRC validation remains enabled.
 
-The compact storage record uses at most 272 bytes (32-byte journal envelope and up to 240 bytes of settings plus DC calibration). The deployed R5 USB trial occupies 64,456 bytes of its 64,512-byte application region, leaving 56 bytes; the ordinary public profile remains USB-off. A fully configured, clean-copy-verified but unflashed R6 USB-trial software image is 64,408 bytes (104 bytes free) and does not change the deployed R5 image. Host enumeration, held-frame transfers, host-requested Single captures, cancellation, timeout and three automatic restart checks were verified on the reference board. Electrical compliance and gap-free acquisition are not qualified. See [Build results](docs/building.md) and [Release readiness](docs/release-readiness.md) for software resource measurements. The spectrum view is software-verified; current target timing verification is pending. Use SEL to reach Domain, then + for Spectrum or - for Scope; OK keeps its normal RUN/HOLD behavior. See [Spectrum engineering and limitations](docs/spectrum-design.md).
+The fully enabled R6 bench image uses 64,408 of 64,512 application bytes, leaving 104 bytes. Reference-board checks covered Scope and Spectrum acquisition, immutable raw export, three restarts, USB session recovery and repeated MATLAB captures. The stock-board USB option remains experimental. See the [verification results](docs/release-readiness.md) and [build measurements](docs/building.md).
+
+Use SEL to reach Domain, then + for Spectrum or − for Scope. OK controls RUN/HOLD in both views. See the [Spectrum design and bench results](docs/spectrum-design.md).
 
 ## Quick start
 
