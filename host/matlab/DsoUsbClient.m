@@ -325,8 +325,9 @@ classdef DsoUsbClient < handle
                     meta.Pretrigger >= meta.Count || meta.TimerHz == 0 || meta.Divider == 0 || meta.Token == 0
                 error("DsoUsbClient:Frame", "Frame metadata is outside protocol bounds.");
             end
+            % Bit 3 is the only defined flag; all other bits are reserved.
             if meta.CalibrationKind > 2 || meta.Coupling > 3 || meta.TriggerMode > 2 || ...
-                    meta.TriggerEdge > 1 || bitand(meta.Flags, uint8(240)) ~= 0
+                    meta.TriggerEdge > 1 || bitand(meta.Flags, uint8(247)) ~= 0
                 error("DsoUsbClient:Frame", "Frame metadata contains an unknown enum or flag.");
             end
         end

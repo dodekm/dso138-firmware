@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased — Basic FFT and compact settings/calibration storage
+## Pending v2.0.0 — candidate, not released
 
+- This candidate removes waveform save/recall, the slow 10–500 s/div rolling timebases, minimum/maximum voltage readouts and AC RMS from v1.0.1. It uses a 1 KiB settings/calibration page; older saved records are not migrated. See [upgrade notes](docs/getting-started.md#upgrade-notes) before programming.
+- Retain per-device identity configuration and USB-off default. The opt-in stock-board USB profile remains an electrically unqualified bench experiment; no universal or board-specific bench image is included.
+
+### Engineering changes
+
+- Validate waveform metadata flags against protocol v1: only edge-triggered bit 3 is defined.
 - Add an independently developed fixed-point real FFT and a fixed 512-point, mean-removed, periodic-Hann spectrum view. It uses the frozen record's actual timer rate, ADC peak-referenced dBFS, a fixed +10 to -70 dBFS plot and a strongest positive-frequency-bin readout without interpolation.
 - Recover 176 more bytes with bounded 32-bit UI integer formatting, checked byte-offset label tables and a shared LCD fallback command loop. Existing scope, FFT and calibration behavior is retained.
 - Share exact scaled-ratio arithmetic between waveform projection and frequency measurement, recovering 96 bytes of Flash with unchanged numerical results. The normal projection path remains inline.

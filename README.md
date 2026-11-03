@@ -4,6 +4,8 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 
 [User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Release readiness](docs/release-readiness.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
+Planning an update? Read the [v2 candidate upgrade notes](docs/getting-started.md#upgrade-notes) first. The latest published release remains v1.0.1; this source branch is still an unreleased candidate.
+
 USB waveform export is an opt-in stock-board experiment. The ordinary build keeps it off. See [USB setup and test status](docs/usb-hardware.md), the [waveform protocol](docs/usb-protocol.md), and the [MATLAB client instructions](host/matlab/README.md).
 
 ![Illustrative DSO138 screen preview](docs/screen-preview.svg)
