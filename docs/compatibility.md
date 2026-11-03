@@ -6,6 +6,11 @@ Reference-board operation has been checked on JYE Tech DSO138 PCB **109-13800-00
 
 The source begins with zero UID words and zero board identity. Before normal startup, configure these for your MCU as explained in [Getting started](getting-started.md). The device ID `0x410`, 64 KiB Flash-size and ILI9341 controller checks are required; keep them enabled.
 
+Studio 2 connects to USB CDC firmware implementing waveform protocol v1.
+The companion firmware adds remote settings and live successive captures.
+R6 retains held downloads, Single and Repeat in Studio. See the [USB
+hardware guide](usb-hardware.md) for the opt-in board configuration.
+
 ## Variants and limits
 
 Other PCB revisions, display controllers, MCU variants and DSO138-family derivatives are not verified. Compatibility cannot be inferred from a similar connector or board name. This repository contains no DLO138 implementation or JYE Tech binary firmware.

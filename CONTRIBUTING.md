@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions to the public firmware source and user-facing documentation are welcome. Keep changes focused and describe the board and observed behavior clearly.
+Contributions to the firmware, Windows Studio source and user-facing documentation are welcome. Keep changes focused and describe the observed behavior clearly.
 
 ## Report a hardware issue
 
@@ -10,4 +10,9 @@ Do not post your MCU's private 96-bit UID or an ST-Link serial number. They are 
 
 ## Scope
 
-This public contribution area is for firmware source and user or build documentation. Do not add tests, generated build outputs, local reports, or private working files to a contribution.
+For a Studio issue, include the app and firmware versions, Windows build,
+and the exact steps or controls involved. Indicate whether it also occurs
+with the demo waveform and whether a live capture was active.
+
+Keep generated build outputs, local test reports and private working files
+outside the release tree.

@@ -406,9 +406,9 @@ DSO138 Studio 2 connects to firmware that implements waveform protocol v1 over U
 \item Inspect measurements, cursors or the spectrum. Use \textbf{File > Save capture} for a lossless \texttt{.dso138} file or \textbf{File > Export CSV} for samples, timing, calibration and capture metadata.
 \end{enumerate}
 
-Older R6 firmware supports held downloads, Single and Repeat. Live settings readback, remote settings and configured-trigger acquisition depend on compatible Studio 2 firmware. See \texttt{host/windows/README.md} for package details, controls and supported firmware behavior.
+Older R6 firmware supports held downloads, Single and Repeat. Live settings readback, remote settings and configured-trigger acquisition require the companion firmware for Studio 2. See the \href{https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0}{Windows release} and the \href{https://github.com/dodekm/dso138-firmware/blob/main/host/windows/README.md}{Studio guide} for downloads, controls and firmware compatibility.
 
-Studio live view uses successive complete records, not continuous sample streaming. Captures have acquisition, presentation and transfer gaps. In the reference-board Studio 2 test at 1\,ms/div, five complete records arrived at 4.84 records/s; the actual sample rate was about 102.27\,kS/s. This is a bounded result for that signal and setup, not a gap-free streaming rate or a guarantee for other timebases and PCs.
+Studio live view displays successive complete records with gaps between captures. In the reference test at 1\,ms/div, the Studio window displayed 4.55 records/s, with a sample rate of about 102.27\,kS/s within each record. The PC update rate varies with the signal, settings and USB transfer time.
 
 If the COM port is absent, check that the installed image has USB enabled and reconnect after closing other serial software. The reference-board R6 test verified restart and CDC reconnection; after reopening the port, an old transfer token was rejected and a fresh download returned the held record. USB bus suspend and resume are covered by software tests, not a board qualification.
 

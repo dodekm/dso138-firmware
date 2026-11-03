@@ -1,5 +1,7 @@
 # Building
 
+For the Windows application, see [Studio build and package instructions](../host/windows/README.md#build-and-package). The current board-specific firmware measurements are in [Configured Studio 2 firmware](#configured-studio-2-firmware).
+
 ## Toolchain
 
 The CubeIDE project is configured for STM32CubeIDE **2.2.0**, GNU Tools for STM32 **14.3.rel1**, and an STM32CubeMX **6.18.1** hardware configuration. HAL/CMSIS sources are included.

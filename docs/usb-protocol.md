@@ -151,6 +151,11 @@ records.
 
 ## Hardware smoke results
 
+Current Studio 2 checks cover settings readback, acknowledged writes,
+successive captures, raw data agreement between legacy and extended
+exports, session rollback and acquisition under USB traffic. See the
+[current bench results](../host/windows/VERIFICATION.md#reference-board-results).
+
 R6 live protocol smoke passed fragmented frames, exact duplicate replay, conflicting-ID rejection, bad-CRC rejection and resynchronization. Three verified restart/CDC handshakes reached INFO/STATUS readiness in 4.96–5.52 s including probe work. The R6 DTR test deasserted DTR with a frame lease active, closed/reopened CDC, observed `Stale` for the old lease token, recovered INFO/STATUS with no job, and exported the same held record with matching full metadata and RAW hash. This is a control-line/session-loss check; it does not test USB bus suspend/resume.
 
 The R6 Python host test completed three 1,024-sample Single captures (epochs 370–372). Acknowledgments took 1.07–1.17 ms, request-to-completion took 79.14–80.20 ms, and raw reads took 47.89–50.74 ms (40.37–42.76 kB/s of sample bytes). Cancellation returned `Cancelled`. A 1 ms deadline returned `Timeout` and left no pending job. See the [Studio 2 verification](../host/windows/VERIFICATION.md) for the current firmware's remote settings and capture results.

@@ -6,6 +6,8 @@ updates, and provides time-domain measurements, cursors, FFT analysis,
 capture history and export. The built-in demonstration trace works
 without a connected instrument.
 
+[Download the portable Windows x64 app](https://github.com/dodekm/dso138-firmware/releases/latest).
+
 ## Quick start
 
 1. Extract the Windows x64 package to a folder where you can write files. Keep the Qt DLLs, runtime DLLs, and `platforms` plugin folder beside `DSO138Studio.exe`.

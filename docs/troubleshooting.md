@@ -25,3 +25,22 @@ D3 is an activity cue for accepted trigger crossings. It stays off when there is
 Voltage readings depend on the individual analog front end. Default gain and zero settings are not a laboratory calibration and may not transfer between instruments. The final 1 KiB of Flash stores scope settings and DC calibration. Waveform save/recall is not available. Avoid erasing the storage page if you need to retain those settings and calibration.
 
 The single-page storage format can lose previously saved data if reset or power fails during a save. Version 2 uses the old lower storage bank as application space. See the [upgrade notes](getting-started.md#upgrade-notes) before programming over version 1.
+
+## Windows Studio cannot connect or start a capture
+
+Select the scope's USB CDC COM port in Studio. Close other applications
+using that port. If the port is absent, check normal instrument power
+and confirm the firmware was built with USB enabled. The [USB hardware
+guide](usb-hardware.md) describes the supported setup.
+
+Put the scope in HOLD before downloading a record, requesting a
+capture or changing timebase or trigger settings. Compatible firmware
+also exposes **Put scope in HOLD** in Studio. Wait for the switches and
+foreground work to settle. Resume local RUN from the physical panel.
+Older R6 firmware supports held downloads, Single and Repeat.
+
+In Normal or Single mode, a record can wait for a qualifying trigger.
+Use Auto if you want updates without waiting indefinitely for an edge.
+The live update rate is measured in records per second on the PC. The
+sample rate describes the timing within each record. See the [Studio
+guide](../host/windows/README.md) for controls and measurements.

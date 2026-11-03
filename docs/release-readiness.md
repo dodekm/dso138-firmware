@@ -1,6 +1,22 @@
 # Release verification
 
-Version 2.0.0 was verified with the R6 USB bench profile on the classic DSO138 PCB 109-13800-00C with an STM32F103C8T6 and ILI9341. The public source requires owner configuration and defaults to USB off. Device identities, bench images and detailed test artifacts remain private.
+The current release pairs DSO138 Studio 2.0 with companion firmware for the classic DSO138 PCB 109-13800-00C with an STM32F103C8T6 and ILI9341. Owners configure their board identity and build the firmware. USB is off by default. See the [Windows release](https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0) and [build instructions](building.md).
+
+## Current Studio 2 reference results
+
+The USB-enabled companion firmware uses 64,496 of 64,512 application
+bytes. Programming verified the application and preserved the final
+1 KiB settings and calibration page. The board passed remote HOLD,
+timebase and trigger writes, raw exports at three timebases, settings
+rollback and a bounded 500 kS/s acquisition test under USB status
+traffic. At 1 ms/div the Studio window displayed 4.55 records/s in the
+reference run. Live view uses separate acquisitions with gaps between
+records. See the [Studio 2 verification](../host/windows/VERIFICATION.md).
+
+## R6 firmware qualification
+
+The following Flash totals and stack watermark apply to the preceding
+R6 firmware.
 
 | Requirement | Verification |
 | --- | --- |
