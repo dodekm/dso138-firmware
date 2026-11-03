@@ -72,6 +72,14 @@ void ScopeUi::request_arm() noexcept
     redraw();
 }
 
+void ScopeUi::hold() noexcept
+{
+    if (state_ == UiRunState::Acquiring || state_ == UiRunState::ArmPending) { invalidate(true); }
+    wants_run_ = false;
+    state_ = UiRunState::Hold;
+    redraw();
+}
+
 std::uint32_t ScopeUi::request_host_single() noexcept
 {
     if (host_single_ || wants_run_ || state_ != UiRunState::Hold || !physical_ready_ || capture_inhibited() ||
@@ -114,12 +122,13 @@ void ScopeUi::physical_update(const PanelUpdate& update) noexcept
     physical_ready_ = ready;
     physical_ = ready ? update.settings : PhysicalSettings{0U, 0U, InputCoupling::Unknown};
     if (!changed) { return; }
+    const bool host_owned = host_single_;
     host_single_ = false;
     calibration_pending_ = {};
     if (state_ == UiRunState::Acquiring || state_ == UiRunState::ArmPending) {
         invalidate(true);
         state_ = UiRunState::Hold;
-        if (settings_.mode == TriggerMode::Single) { wants_run_ = false; }
+        if (host_owned || settings_.mode == TriggerMode::Single) { wants_run_ = false; }
     }
     redraw();
     reconcile();
@@ -130,9 +139,10 @@ void ScopeUi::set_capture_inhibited(bool inhibited) noexcept
     if (inhibited_ == inhibited) { return; }
     inhibited_ = inhibited;
     if (inhibited && (state_ == UiRunState::Acquiring || state_ == UiRunState::ArmPending)) {
+        const bool host_owned = host_single_;
         invalidate(true);
         state_ = UiRunState::Hold;
-        if (settings_.mode == TriggerMode::Single) { wants_run_ = false; }
+        if (host_owned || settings_.mode == TriggerMode::Single) { wants_run_ = false; }
     }
     redraw();
     reconcile();
@@ -220,14 +230,7 @@ void ScopeUi::adjust(int direction) noexcept
         redraw(); return;
     default: return;
     }
-    const bool changed = previous.timebase_index != settings_.timebase_index ||
-        previous.mode != settings_.mode || previous.edge != settings_.edge ||
-        previous.trigger_level_code != settings_.trigger_level_code ||
-        previous.trigger_position_permille != settings_.trigger_position_permille ||
-        previous.vertical_offset_pixels != settings_.vertical_offset_pixels ||
-        previous.horizontal_offset_samples != settings_.horizontal_offset_samples ||
-        previous.measurement_view != settings_.measurement_view;
-    if (!changed) { return; }
+    if (previous == settings_) { return; }
     redraw();
     if (!capture_change || !wants_run_) { return; }
     if (previous.mode == TriggerMode::Single || settings_.mode == TriggerMode::Single) {
@@ -298,16 +301,12 @@ void ScopeUi::press(std::uint8_t key) noexcept
         storage_pending_ = StorageCommand::None;
         calibration_pending_ = {};
         if (state_ == UiRunState::Fault) { state_ = UiRunState::Hold; }
-        if (wants_run_) {
-            if (state_ == UiRunState::Acquiring || state_ == UiRunState::ArmPending) { invalidate(true); }
-            wants_run_ = false;
-            state_ = UiRunState::Hold;
-        } else if (settings_.mode == TriggerMode::Single && (!physical_ready_ || capture_inhibited())) {
+        if (wants_run_) { hold(); return; }
+        if (settings_.mode == TriggerMode::Single && (!physical_ready_ || capture_inhibited())) {
             state_ = !physical_ready_ ? UiRunState::WaitingForControls : UiRunState::WaitingForBackend;
         } else {
             wants_run_ = true;
-            // A completed Single/Held record stays owned until the controller
-            // handles the arm action's cancellation/release ordering.
+            // Release a completed held record through the controller's arm path.
             if (frame_available_) { invalidate(true); }
             state_ = UiRunState::Hold;
             reconcile();
@@ -405,8 +404,12 @@ bool ScopeUi::on_frame_consumed(std::uint32_t request) noexcept
     frame_available_ = false;
     host_single_ = false;
     state_ = UiRunState::Hold;
-    reconcile();
-    redraw();
+    // A completed one-shot is already presented as HOLD. A continuing RUN
+    // can rearm or transition to a waiting status that needs a new scene.
+    if (wants_run_) {
+        reconcile();
+        redraw();
+    }
     return true;
 }
 

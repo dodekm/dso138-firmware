@@ -41,6 +41,16 @@ struct ScopeUiSettings final {
     std::int16_t vertical_offset_pixels;
     std::int16_t horizontal_offset_samples;
     MeasurementView measurement_view{MeasurementView::Overview};
+
+    [[nodiscard]] bool operator==(const ScopeUiSettings& other) const noexcept
+    {
+        return timebase_index == other.timebase_index && mode == other.mode &&
+            edge == other.edge && trigger_level_code == other.trigger_level_code &&
+            trigger_position_permille == other.trigger_position_permille &&
+            vertical_offset_pixels == other.vertical_offset_pixels &&
+            horizontal_offset_samples == other.horizontal_offset_samples &&
+            measurement_view == other.measurement_view;
+    }
 };
 [[nodiscard]] bool scope_ui_settings_valid(const ScopeUiSettings& settings, std::uint8_t catalogue_count) noexcept;
 
@@ -138,7 +148,15 @@ public:
     }
 
 private:
+    friend class ScopeController;
+    // The controller validates the selection and owns the acquisition boundary.
+    void apply_host_selection(const ScopeUiSettings& settings) noexcept
+    {
+        settings_ = settings;
+        redraw();
+    }
     void redraw() noexcept;
+    void hold() noexcept;
     void invalidate(bool cancel) noexcept;
     void request_arm() noexcept;
     void reconcile() noexcept;

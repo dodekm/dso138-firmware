@@ -30,22 +30,22 @@ private:
                   const std::uint8_t* payload, std::uint16_t payload_size) noexcept;
     void respond(std::uint8_t opcode, std::uint16_t request_id, UsbStatus status,
                  std::uint8_t payload_size = 0U) noexcept;
-    void queue_frame(const std::uint8_t* frame, std::uint8_t size) noexcept;
+    void respond_settings(std::uint8_t opcode, std::uint16_t request_id) noexcept;
     void flush_tx() noexcept;
     void cancel_owned() noexcept;
-    [[nodiscard]] bool valid_controller_state() const noexcept;
+    [[nodiscard]] std::uint8_t* response_buffer() noexcept
+    { return cache_response_ ? replay_.data() : tx_.data(); }
 
     ScopeController& controller_;
     UsbStreamPort port_;
-    CaptureExportView export_view_{};
     std::array<std::uint8_t, UsbProtocolMaximumFrame> rx_{};
     std::array<std::uint8_t, UsbProtocolMaximumFrame> tx_{};
     std::array<std::uint8_t, UsbProtocolMaximumFrame> replay_{};
+    const std::uint8_t* tx_pending_{};
     std::uint32_t session_{};
     std::uint32_t last_activity_ms_{};
     std::uint32_t capture_deadline_ms_{};
     std::uint32_t host_job_{};
-    std::uint32_t export_token_{};
     std::uint32_t last_request_crc_{};
     std::uint16_t last_request_id_{};
     std::uint16_t last_rx_size_{};
@@ -53,7 +53,6 @@ private:
     std::uint8_t replay_size_{};
     std::uint8_t last_opcode_{};
     bool cache_response_{};
-    bool tx_pending_{};
     bool capture_timed_out_{};
 };
 

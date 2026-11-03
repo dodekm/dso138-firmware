@@ -112,6 +112,10 @@ public:
                                           std::uint16_t bit = 0U, ScreenTextRange* range = nullptr) noexcept
         : data_{buffer}, dirty_{dirty}, range_{range}, size_{N}, bit_{bit}
     { static_assert(N <= 64U, "Text change endpoints must fit the bounded glyph range"); }
+    Text(char* buffer, std::uint16_t size, std::uint16_t* dirty,
+         std::uint16_t bit, ScreenTextRange* range) noexcept
+        : data_{buffer}, dirty_{dirty}, range_{range}, size_{size}, bit_{bit}
+    {}
     ~Text() noexcept
     {
         if (!old_ended_ && data_[used_] != '\0') {
@@ -181,6 +185,24 @@ private:
     bool changed_{};
     bool old_ended_{};
 };
+
+// Share the dirty-range update and termination code for one-shot labels.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+void set_label_text(char* buffer, std::uint16_t capacity, std::uint16_t* dirty,
+                    std::uint16_t bit, ScreenTextRange* range, const char* value) noexcept
+{
+    Text{buffer, capacity, dirty, bit, range}.add(value);
+}
+
+template<std::size_t N>
+void set_label(char (&buffer)[N], const char* value, std::uint16_t* dirty = nullptr,
+               std::uint16_t bit = 0U, ScreenTextRange* range = nullptr) noexcept
+{
+    static_assert(N <= 64U, "Text change endpoints must fit the bounded glyph range");
+    set_label_text(buffer, N, dirty, bit, range, value);
+}
 
 void voltage(Text& text, std::int64_t microvolts) noexcept
 {
@@ -326,21 +348,18 @@ void ScopeController::panel_update(const PanelUpdate& update, std::uint32_t now_
 
 void ScopeController::buttons(const ButtonEvents& event, std::uint32_t now_ms) noexcept
 {
+    local_buttons_held_ = event.held;
     if (storage_busy()) {
         ui_.buttons({0U, 0U, event.held, true}, now_ms);
         return;
     }
+    if (event.pressed != 0U) { restore_host_settings(); }
     const auto prior_settings = ui_.settings();
     const auto prior_request = ui_.request_id();
     ui_.buttons(event, now_ms);
-    const auto& next_settings = ui_.settings();
-    if (event.pressed != 0U || event.discontinuity || prior_settings.timebase_index != next_settings.timebase_index ||
-        prior_settings.mode != next_settings.mode || prior_settings.edge != next_settings.edge ||
-        prior_settings.trigger_level_code != next_settings.trigger_level_code ||
-        prior_settings.trigger_position_permille != next_settings.trigger_position_permille ||
-        prior_settings.vertical_offset_pixels != next_settings.vertical_offset_pixels ||
-        prior_settings.horizontal_offset_samples != next_settings.horizontal_offset_samples ||
-        prior_settings.measurement_view != next_settings.measurement_view || ui_.request_id() != prior_request) {
+    if (event.pressed != 0U || event.discontinuity || !(prior_settings == ui_.settings()) ||
+        ui_.request_id() != prior_request) {
+        ++host_settings_revision_;
         invalidate_export();
         supersede_host_job();
     }
@@ -353,7 +372,6 @@ void ScopeController::buttons(const ButtonEvents& event, std::uint32_t now_ms) n
 
 void ScopeController::invalidate_export() noexcept
 {
-    export_active_ = false;
     export_token_ = 0U;
 }
 
@@ -370,40 +388,49 @@ void ScopeController::supersede_host_job() noexcept
     else if (host_state_ == HostCaptureState::Complete) { host_state_ = HostCaptureState::Cancelled; }
 }
 
-bool ScopeController::begin_export(CaptureExportView& view) noexcept
+// Share the foreground ownership check for every host operation that starts
+// from HOLD. Each caller adds its own producer or record requirement.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+bool ScopeController::host_idle_hold() const noexcept
 {
-    if (export_active_ || !frame_valid_ || frame_.capture.length == 0U || ui_.state() != UiRunState::Hold || ui_.wants_run() ||
-        acquisition_.state() != AcquisitionState::Stopped || pending_consumption_ || work_ != UiWork::Idle ||
-        storage_busy() || ui_.has_pending_operation() || host_request_ != 0U) { return false; }
+    return ui_.state() == UiRunState::Hold && !ui_.wants_run() &&
+        export_token_ == 0U && !pending_consumption_ && work_ == UiWork::Idle &&
+        !storage_busy() && !ui_.has_pending_operation() && host_request_ == 0U;
+}
+
+std::uint32_t ScopeController::begin_export() noexcept
+{
+    if (!frame_valid_ || frame_.capture.length == 0U ||
+        acquisition_.state() != AcquisitionState::Stopped || !host_idle_hold()) { return 0U; }
     export_generation_ = next_panel_generation(export_generation_);
     export_token_ = export_generation_;
-    export_active_ = true;
-    view = CaptureExportView{frame_, frozen_calibration_, export_token_};
+    return export_token_;
+}
+
+const std::uint16_t* ScopeController::export_samples(std::uint32_t token) const noexcept
+{
+    return token != 0U && token == export_token_ ? samples_.data() : nullptr;
+}
+
+bool ScopeController::end_export(std::uint32_t token) noexcept
+{
+    if (token == 0U || token != export_token_) { return false; }
+    invalidate_export();
     return true;
 }
 
-bool ScopeController::export_sample(std::uint32_t token, std::uint16_t index, std::uint16_t& out) const noexcept
-{
-    if (!export_active_ || token == 0U || token != export_token_ || !frame_valid_ || index >= frame_.capture.length) { return false; }
-    out = samples_[index];
-    return true;
-}
-
-void ScopeController::end_export(std::uint32_t token) noexcept
-{
-    if (export_active_ && token != 0U && token == export_token_) { invalidate_export(); }
-}
-
-std::uint32_t ScopeController::request_host_single() noexcept
+std::uint32_t ScopeController::request_host_single(bool use_selected_mode) noexcept
 {
     if (!config_.acquisition_enabled || !ui_.physical_ready() || ui_.capture_inhibited() ||
-        ui_.state() != UiRunState::Hold || ui_.wants_run() || export_active_ || acquisition_running() || pending_consumption_ ||
-        work_ != UiWork::Idle || storage_busy() || ui_.has_pending_operation() || host_request_ != 0U) { return 0U; }
+        acquisition_running() || !host_idle_hold()) { return 0U; }
     const auto request = ui_.request_host_single();
     if (request == 0U) { return 0U; }
     invalidate_export();
     host_job_ = next_panel_generation(host_job_);
     host_request_ = request;
+    host_uses_selected_mode_ = use_selected_mode;
     host_state_ = HostCaptureState::Pending;
     return host_job_;
 }
@@ -420,6 +447,55 @@ bool ScopeController::cancel_host_capture(std::uint32_t job) noexcept
     cancel_host_job(HostCaptureState::Cancelled);
     invalidate_export();
     return true;
+}
+
+bool ScopeController::host_settings_writable() const noexcept
+{
+    return local_buttons_held_ == 0U && acquisition_.state() == AcquisitionState::Stopped &&
+        !calibration_session_.active() && host_idle_hold();
+}
+
+HostSettingsResult ScopeController::apply_host_settings(std::uint16_t expected_revision,
+    const ScopeUiSettings& settings) noexcept
+{
+    if (!scope_ui_settings_valid(settings, ScopeTimebaseCount)) { return HostSettingsResult::Invalid; }
+    if (expected_revision != host_settings_revision_) { return HostSettingsResult::Stale; }
+    if (!host_settings_writable()) { return HostSettingsResult::Busy; }
+
+    const auto& current = ui_.settings();
+    if (current == settings) { return HostSettingsResult::Applied; }
+    if (!host_override_active_) {
+        host_prior_settings_ = current;
+        host_override_active_ = true;
+    }
+    ui_.apply_host_selection(settings);
+    ++host_settings_revision_;
+    refresh_backend();
+    return HostSettingsResult::Applied;
+}
+
+void ScopeController::restore_host_settings() noexcept
+{
+    if (!host_override_active_) { return; }
+    ui_.apply_host_selection(host_prior_settings_);
+    host_override_active_ = false;
+    ++host_settings_revision_;
+}
+
+bool ScopeController::host_hold_available() const noexcept
+{
+    return ui_.wants_run() && ui_.settings().mode != TriggerMode::Single &&
+        host_request_ == 0U && local_buttons_held_ == 0U && !storage_busy() &&
+        fault_ == UiControllerFault::None;
+}
+
+HostSettingsResult ScopeController::hold_from_host(std::uint16_t expected_revision) noexcept
+{
+    if (expected_revision != host_settings_revision_) { return HostSettingsResult::Stale; }
+    if (!host_hold_available()) { return HostSettingsResult::Busy; }
+    ui_.hold();
+    ++host_settings_revision_;
+    return HostSettingsResult::Applied;
 }
 
 bool ScopeController::sample(std::uint16_t index, std::uint16_t& out) const noexcept
@@ -563,12 +639,14 @@ void ScopeController::arm(std::uint32_t request) noexcept
     // 512-sample processing exceeds the former arbitrary 500us cap. The
     // monitor still requires a full safety margin and validates each copy.
     const auto poll_cycles = room < 72000U ? room : 72000U;
-    const auto capture_mode = host_request_ == request ? TriggerMode::Single : settings.mode;
+    const auto capture_mode = host_request_ == request && !host_uses_selected_mode_ ?
+        TriggerMode::Single : settings.mode;
     const AcquisitionRequest acquisition_request{
         {CaptureCapacity, pretrigger, settings.trigger_level_code, hysteresis, capture_mode, settings.edge,
          capture_mode == TriggerMode::Auto ? timeout : 0U},
         ui_.physical(), plan_.timing, {period, safety, poll_cycles, 2U}, request};
     active_request_ = request;
+    active_timebase_index_ = settings.timebase_index;
     // Keep the completed physical trace throughout acquisition. The projection
     // is logically unavailable until the next frozen record is projected;
     // neither label formatting nor an LCD transfer may delay the fast producer.
@@ -589,6 +667,7 @@ void ScopeController::begin_copy() noexcept
     measurement_.cancel();
     frame_valid_ = false;
     frame_ = *metadata;
+    frame_timebase_index_ = active_timebase_index_;
     frozen_calibration_ = active_calibration_;
     frame_request_ = active_request_;
     pending_consumption_ = true;
@@ -708,6 +787,7 @@ void ScopeController::finish_storage(UiStorageStatus status) noexcept
     storage_phase_ = StoragePhase::Idle;
     storage_command_ = StorageCommand::None;
     storage_status_ = status;
+    ++host_settings_revision_;
     if (config_.storage_input.pause != nullptr) { config_.storage_input.pause(config_.storage_input.context, false); }
     static_cast<void>(ui_.take_actions());
     if (boot && config_.storage_input.pause != nullptr) { storage_boot_waiting_input_ = true; }
@@ -1005,7 +1085,7 @@ void ScopeController::format_scene() noexcept
         state == UiRunState::FrameReady ? "FRAME" : state == UiRunState::WaitingForControls ? "WAIT INPUT" :
         state == UiRunState::WaitingForBackend ? "WAIT BACK" : "ARM";
     if (state == UiRunState::Fault) { status = "FAULT"; }
-    Text{scene.status, &dirty_labels_, 1U, &screen_.text_ranges_[0U]}.add(status);
+    set_label(scene.status, status, &dirty_labels_, 1U, &screen_.text_ranges_[0U]);
     const auto kind = frame_valid_ ? frozen_calibration_.kind : CalibrationKind::Unavailable;
     const auto& settings = ui_.settings();
     const bool spectrum = ui_.domain() == Domain::Spectrum;
@@ -1013,8 +1093,8 @@ void ScopeController::format_scene() noexcept
         const auto* spectrum_result = spectrum_.result();
         Text quality{scene.quality, &dirty_labels_, 2U, &screen_.text_ranges_[1U]};
         quality.add("FFT");
-        Text{scene.channel, &dirty_labels_, 4U, &screen_.text_ranges_[2U]}.add("FFT 512 HANN AC");
-        Text{scene.timebase, &dirty_labels_, 8U, &screen_.text_ranges_[3U]}.add("dBFS ADC peak: 2048");
+        set_label(scene.channel, "FFT 512 HANN AC", &dirty_labels_, 4U, &screen_.text_ranges_[2U]);
+        set_label(scene.timebase, "dBFS ADC peak: 2048", &dirty_labels_, 8U, &screen_.text_ranges_[3U]);
         Text peak{scene.trigger, &dirty_labels_, 16U, &screen_.text_ranges_[4U]};
         if (spectrum_result != nullptr && spectrum_result->available && spectrum_result->peak_available) {
             peak.add("Pk "); microhertz(peak, spectrum_.peak_frequency_microhertz()); peak.add(" ");
@@ -1028,10 +1108,10 @@ void ScopeController::format_scene() noexcept
             sampling.add("df "); microhertz(sampling, spectrum_result->bin_spacing_microhertz);
             Text span{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]};
             span.add("0.. "); microhertz(span, spectrum_result->nyquist_microhertz); span.add(" 10dB/div");
-            Text{scene.zero_label}.add("0dB");
+            set_label(scene.zero_label, "0dB");
             scene.zero_y = static_cast<std::int16_t>(SpectrumPlotTop);
         } else {
-            Text{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]}.add("df --");
+            set_label(scene.sampling, "df --", &dirty_labels_, 32U, &screen_.text_ranges_[5U]);
             Text record{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]};
             if (!frame_valid_) { record.add("FFT NEEDS FROZEN FRAME"); }
             else if (acquisition_running()) { record.add("FFT NEEDS HELD UNIFORM BLOCK"); }
@@ -1042,7 +1122,8 @@ void ScopeController::format_scene() noexcept
         }
         scene.trigger_y = -1; scene.trigger_x = -1;
     } else {
-    Text{scene.quality, &dirty_labels_, 2U, &screen_.text_ranges_[1U]}.add(kind == CalibrationKind::Measured ? "CAL" : kind == CalibrationKind::Nominal ? "NOM" : "RAW");
+    set_label(scene.quality, kind == CalibrationKind::Measured ? "CAL" : kind == CalibrationKind::Nominal ? "NOM" : "RAW",
+              &dirty_labels_, 2U, &screen_.text_ranges_[1U]);
     const auto& physical = frame_valid_ ? frame_.physical : ui_.physical();
     Text channel{scene.channel, &dirty_labels_, 4U, &screen_.text_ranges_[2U]}; channel.add(coupling_name(physical.coupling)).add(" ");
     if (kind == CalibrationKind::Unavailable && physical.microvolts_per_div != 0U) { channel.add("SEN "); }
@@ -1064,12 +1145,12 @@ void ScopeController::format_scene() noexcept
         std::int32_t zero{}, threshold{};
         const auto viewport = view();
         if (kind == CalibrationKind::Unavailable) {
-            Text{scene.zero_label}.add("REF");
+            set_label(scene.zero_label, "REF");
             if (project_code_y(2048U, frame_, frozen_calibration_, viewport, zero) && zero >= 0 && zero < ScopePlotHeight) {
                 scene.zero_y = static_cast<std::int16_t>(zero);
             }
         } else {
-            Text{scene.zero_label}.add("0V");
+            set_label(scene.zero_label, "0V");
             zero = ScopePlotHeight / 2 + settings.vertical_offset_pixels;
             if (zero >= 0 && zero < ScopePlotHeight) { scene.zero_y = static_cast<std::int16_t>(zero); }
         }
@@ -1080,7 +1161,10 @@ void ScopeController::format_scene() noexcept
         if (project_trigger_x(frame_, viewport, trigger_x) && trigger_x >= 0 && trigger_x <= ScopePlotWidth) {
             scene.trigger_x = static_cast<std::int16_t>(trigger_x == ScopePlotWidth ? ScopePlotWidth - 1U : trigger_x);
         }
-    } else { Text{scene.sampling, &dirty_labels_, 32U, &screen_.text_ranges_[5U]}.add("NO RECORD"); Text{scene.record, &dirty_labels_, 64U, &screen_.text_ranges_[6U]}.add("No record"); }
+    } else {
+        set_label(scene.sampling, "NO RECORD", &dirty_labels_, 32U, &screen_.text_ranges_[5U]);
+        set_label(scene.record, "No record", &dirty_labels_, 64U, &screen_.text_ranges_[6U]);
+    }
     }
     Text focus{scene.focus, &dirty_labels_, 128U, &screen_.text_ranges_[7U]};
     switch (ui_.focus()) {
@@ -1164,7 +1248,7 @@ void ScopeController::format_scene() noexcept
     else if (settings.measurement_view == MeasurementView::Frequency) { hint = "F clock nominal; alias risk"; }
     else if (frame_valid_ && kind == CalibrationKind::Unavailable) { hint = "RAW: no volts"; scene.warning = true; }
     else if (frame_valid_ && projection_.interpolated) { hint = "Interpolated trace"; }
-    Text{scene.hint, &dirty_labels_, 256U, &screen_.text_ranges_[8U]}.add(hint);
+    set_label(scene.hint, hint, &dirty_labels_, 256U, &screen_.text_ranges_[8U]);
 }
 
 } // namespace dso

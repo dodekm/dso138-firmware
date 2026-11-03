@@ -1,6 +1,11 @@
 # DSO waveform protocol v1
 
-This document describes the compact host-facing command protocol implemented by `dso_usb_protocol.cpp`. A transport adapter supplies configured-session identity and nonblocking packet read/write; the protocol itself neither selects a USB class nor configures STM32 registers. Hardware wiring and the limits of the opt-in stock-board trial are described in [USB hardware and driver contract](usb-hardware.md). The protocol supports read-only waveform access and a host-requested single capture. It has no commands for changing settings or writing Flash.
+This document describes the host-facing command protocol implemented by
+`dso_usb_protocol.cpp` and `dso_usb_service.cpp`. The transport supplies
+configured-session identity and nonblocking packet read/write. See the
+[USB hardware and driver contract](usb-hardware.md) for the opt-in
+stock-board trial. Studio 2 adds optional live settings operations to
+the original waveform and Single-capture commands.
 
 ## Framing
 
@@ -30,13 +35,19 @@ Payload sizes below exclude the outer frame. Command response payloads always be
 
 | Opcode | Request payload | Response payload after status | Description |
 | ---: | --- | --- | --- |
-| `01 INFO` | Empty | `protocolVersion:u8`, `maxSamples:u16`, `rawBits:u8`, `maxSamplesPerRead:u8`, `reserved:u16` | Returns protocol version 1, 1024 samples, 12 raw bits, and maximum chunk 22. No fabricated device identity is returned. |
+| `01 INFO` | Empty | `protocolVersion:u8`, `maxSamples:u16`, `rawBits:u8`, `maxSamplesPerRead:u8`, `reserved:u16` | Returns protocol version 1, 1024 samples, 12 raw bits, maximum chunk 22 and zero reserved bytes. |
 | `02 STATUS` | `job:u32` (`0` means current) | `uiState:u8`, `controllerFault:u8`, `work:u8`, `hostState:u8`, `job:u32`, `frameAvailable:u8`, `frameCount:u16`, `storageBusy:u8` | Host state values follow `HostCaptureState`: None 0, Pending 1, Complete 2, Cancelled 3, Fault 4. For the matching job, a timed-out capture returns status `Timeout`. |
 | `03 BEGIN_FRAME` | Empty | Exactly 47 bytes of metadata | Leases an immutable, held frame. Returns `Busy` unless the controller permits export. Metadata fields are listed below. |
 | `04 READ_SAMPLES` | `token:u32`, `offset:u16`, `count:u8` | `token:u32`, `offset:u16`, `count:u8`, `samples[count]:u16[]` | Reads 1–22 raw codes from the active frame lease. Codes are 0–4095. The request range must fit the frame. |
 | `05 END_FRAME` | `token:u32` | Empty | Releases only the matching export lease. |
 | `06 CAPTURE_SINGLE` | `timeoutMs:u32` | `job:u32` | Requests one host-owned Single capture. Timeout must be 1–600000 ms and is absolute; STATUS polling does not extend it. |
 | `07 CANCEL_CAPTURE` | `job:u32` | Empty | Cancels only the matching host-owned job while it is pending. It cannot cancel a local acquisition. |
+| `08 GET_SETTINGS` | Empty | Settings snapshot | Discovers optional settings support and reports the current controller and physical settings. Legacy firmware returns `Unsupported`. |
+| `09 SET_SETTINGS` | `revision:u16`, `timebaseIndex:u8`, `triggerMode:u8` | Settings snapshot on success | Applies the timebase and mode together. A rejected request returns only the status. |
+| `0A CAPTURE_SELECTED` | `timeoutMs:u32` | `job:u32` | Starts one host-owned job using the selected trigger mode. Status, timeout and cancellation follow CAPTURE_SINGLE. |
+| `0B BEGIN_FRAME_EXTENDED` | Empty | Exactly 51 bytes of metadata | Same lease as BEGIN_FRAME, with additional frozen timebase and trigger-level fields. |
+| `0C SET_TRIGGER` | `revision:u16`, `edge:u8`, `level:u16`, `position:u16` | Settings snapshot on success | Applies edge, level and position together. Values and guards match the current settings fields below. |
+| `0D HOLD_LOCAL_RUN` | `revision:u16` | Settings snapshot on success | Explicitly stops local continuous Auto/Normal RUN. The panel owns restarting RUN. |
 
 The complete `BEGIN_FRAME` response payload is 48 bytes including status:
 
@@ -62,26 +73,86 @@ The complete `BEGIN_FRAME` response payload is 48 bytes including status:
 | 46 | 1 | Flags: bits 0–2 reserved and zero; bit 3 edge triggered |
 | 47 | 1 | Reserved, zero |
 
-There is no host command for arbitrary trigger or front-panel changes. `CAPTURE_SINGLE` asks the existing controller to start a one-shot only when local control state and acquisition ownership allow it. The scope must be in HOLD and foreground work must be idle; a request while RUN is active can return `Busy`. The host does not take over local acquisition or switch the scope to HOLD. Local button actions retain priority. Connection-session changes, a five-second idle lease timeout, timeout expiry, or local invalidation revoke the host's own lease/job. Disconnect and idle expiry cancel only a pending host job created through this protocol.
+BEGIN_FRAME_EXTENDED appends the following fields to the same response
+payload. The four extra bytes fit within the original frame size limit.
 
-## MATLAB client
+| Payload offset | Size | Field |
+| ---: | ---: | --- |
+| 48 | 1 | Timebase catalogue index at arm |
+| 49 | 2 | Trigger level in ADC codes at arm |
+| 51 | 1 | Reserved, zero |
 
-`host/matlab/DsoUsbClient.m` is a small MATLAB `serialport` client. The USB backend must expose a COM/serial interface; the class does not supply a kernel driver, MATLAB MEX binary, or USB class implementation. The host can query INFO, download a held frame, request/poll a one-shot, and explicitly run repeated one-shot captures with a caller-specified gap. It leaves DTR unchanged.
+`CAPTURE_SINGLE` asks the controller for a one-shot in idle HOLD. It uses
+the selected timebase, trigger edge, level and position with Single
+trigger semantics. The host leaves the local RUN/HOLD intent in the
+controller's hands. Connection-session changes, a five-second idle
+lease timeout, timeout expiry, or local invalidation revoke the host's
+own lease/job. Disconnect and idle expiry cancel only a pending host job
+created through this protocol.
 
-The `Raw` field is always the returned ADC code vector. `TimeSeconds` is the nominal rational timer axis
+`CAPTURE_SELECTED` uses Auto's trigger wait and fallback when Auto is
+selected. Normal and Single wait for an edge. Each host job still
+completes at most once and leaves the local scope in HOLD.
 
-```text
-(0:count-1) - pretrigger, multiplied by divider / timerHz
-```
+## Current settings extension
 
-when expressed as a column vector. `VoltageMicrovolts` and `VoltageVolts` are empty when calibration kind is Unavailable. Otherwise the client applies the transmitted Q16 zero, gain, and shift using integer arithmetic with round-to-nearest, ties away from zero. Calibration metadata describes the firmware's configured profile; it does not independently establish analog accuracy.
+GET_SETTINGS and successful SET_SETTINGS replies share one 32-byte body.
+Offsets here exclude the status byte.
 
-Repeated `capture` calls have acquisition/presentation dead time. The optional `gapSeconds` in `captureRepeated` adds an explicit delay between those calls; it is not a continuous recorder and makes no throughput guarantee.
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 1 | Settings schema, currently 1 |
+| 1 | 1 | Writable capabilities. Bit 0 timebase, 1 mode, 2 edge, 3 level, 4 position, 5 local RUN pause. |
+| 2 | 1 | UI state. Hold 0, waiting for controls 1, waiting for backend 2, arm pending 3, acquiring 4, frame ready 5, fault 6. |
+| 3 | 1 | Flags. Bit 0 RUN intent, 1 qualified physical settings, 2 setting write admissible now, 3 CAPTURE_SELECTED and BEGIN_FRAME_EXTENDED supported, 4 local RUN pause admissible now. |
+| 4 | 1 | Selected timebase index |
+| 5 | 1 | Number of timebase entries |
+| 6 | 1 | Selected mode. Normal 0, Auto 1, Single 2. |
+| 7 | 1 | Rising edge 0, falling edge 1 |
+| 8 | 2 | Trigger level in ADC codes (0–4095) |
+| 10 | 2 | Trigger position in permille (0–1000) |
+| 12 | 4 | Nominal sensitivity in µV/div, zero when the switches are unqualified |
+| 16 | 4 | Selected timer clock in Hz |
+| 20 | 4 | Selected timer divider |
+| 24 | 1 | Coupling. Unknown 0, DC 1, AC 2, ground 3. |
+| 25 | 1 | Catalogue ID. ID 1 is the classic 10/20/50 µs/div sequence across successive decades. |
+| 26 | 2 | Settings revision, compared by equality within the session |
+| 28 | 4 | Nominal timebase in µs/div |
+
+The timer clock and divider can both be zero while the selected plan is
+unavailable. The settings apply to the next acquisition. Held
+waveform data and its capture metadata stay frozen. A write requires the
+last acknowledged revision and idle HOLD with no lease, storage,
+calibration, or local button gesture. A stale revision returns
+`Stale`; read current settings again before offering another write.
+Retry a lost acknowledgement with the same ID and payload.
+
+The first write saves the local selections in RAM. A local button press
+restores those selections before applying the panel action. Transport
+session loss or five seconds without a valid request also restores the
+selections. Coupling and sensitivity follow the physical switches
+throughout.
+
+HOLD_LOCAL_RUN is an explicit acquisition action. It uses the same stop
+path as the panel and preserves a completed record if available. HOLD
+remains in effect after disconnect. A pending host-owned job or a local
+Single acquisition cannot be paused through this command.
+
+## Interpreting captures
+
+Use [DSO138 Studio for Windows](../host/windows/README.md) to download held captures, request one-shots or acquire successive records over USB CDC.
+
+Raw sample words are ADC codes. For zero-based sample index `i`, time
+relative to the trigger is `(i - pretrigger) * divider / timerHz`.
+Studio applies the transmitted Q16 zero, gain and shift when calibration
+is available. Calibration metadata describes the configured conversion.
+Successive captures have acquisition and presentation intervals between
+records.
 
 ## Hardware smoke results
 
 R6 live protocol smoke passed fragmented frames, exact duplicate replay, conflicting-ID rejection, bad-CRC rejection and resynchronization. Three verified restart/CDC handshakes reached INFO/STATUS readiness in 4.96–5.52 s including probe work. The R6 DTR test deasserted DTR with a frame lease active, closed/reopened CDC, observed `Stale` for the old lease token, recovered INFO/STATUS with no job, and exported the same held record with matching full metadata and RAW hash. This is a control-line/session-loss check; it does not test USB bus suspend/resume.
 
-The R6 Python host test completed three 1,024-sample Single captures (epochs 370–372): acknowledgments took 1.07–1.17 ms, request-to-completion 79.14–80.20 ms, and RAW reads 47.89–50.74 ms (40.37–42.76 kB/s of sample bytes). Cancellation returned `Cancelled`; a 1 ms deadline returned `Timeout`, and no job remained pending. MATLAB R2025b with the current public client exported held-frame data and completed a host Single capture. Its `captureRepeated(3,uint32(3000),0)` run returned three 1,024-sample records in 3.361 s with distinct increasing epochs 377–379 and monotonic time axes. Each capture is a separate Single operation with acquisition/presentation dead time, not continuous or gap-free recording. Historical R4/R5 results also passed; the R5 repeat check took 2.524 s.
+The R6 Python host test completed three 1,024-sample Single captures (epochs 370–372). Acknowledgments took 1.07–1.17 ms, request-to-completion took 79.14–80.20 ms, and raw reads took 47.89–50.74 ms (40.37–42.76 kB/s of sample bytes). Cancellation returned `Cancelled`. A 1 ms deadline returned `Timeout` and left no pending job. See the [Studio 2 verification](../host/windows/VERIFICATION.md) for the current firmware's remote settings and capture results.
 
 The R6 FFT oracle matched peak bin 1 for the exported held record (observed-to-predicted level difference -0.0022 dB). Firmware returned the same raw samples and frozen metadata across Scope/Spectrum/Scope domain checks. A debug-attached timing observation was 64.82 million DWT cycles / 1.75 s including probe work for Spectrum presentation, and 64.96 million cycles / 1.78 s on return. These are bounded end-to-end observations, not FFT-only duration. Screen counters advanced, but no independent visual verification of the scope display or analog metrology was performed; calibration metadata was nominal, not measured. Electrical production compliance and fast repeated acquisition remain unqualified.

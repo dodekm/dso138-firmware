@@ -4,9 +4,16 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 
 [User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Release readiness](docs/release-readiness.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
+[Download DSO138 Studio 2.0 for Windows x64](https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0)
+
 Upgrading to v2.0.0? Review the changes to storage, timebases and measurement readouts in the [upgrade notes](docs/getting-started.md#upgrade-notes).
 
-USB waveform export is an opt-in stock-board experiment. The ordinary build keeps it off. See [USB setup and test status](docs/usb-hardware.md), the [waveform protocol](docs/usb-protocol.md), and the [MATLAB client instructions](host/matlab/README.md).
+USB is an opt-in stock-board experiment. The ordinary firmware build
+keeps it off. [DSO138 Studio](host/windows/README.md) provides a Windows
+workspace for current settings, remote controls, live waveform updates
+from successive captures, measurements, FFT and export. See the
+[USB setup](docs/usb-hardware.md) and
+[protocol](docs/usb-protocol.md) for the supported hardware and commands.
 
 ![Illustrative DSO138 screen preview](docs/screen-preview.svg)
 
@@ -24,12 +31,12 @@ USB waveform export is an opt-in stock-board experiment. The ordinary build keep
 | Trigger indication | D3 flashes on accepted trigger crossings; see [Trigger LED behavior](docs/trigger-led.md) |
 | Measurements | Frequency and absolute peak focus-line readings; peak-to-peak on Amplitude; total RMS and mean on RMS/Mean; raw ADC counts when voltage conversion is unavailable |
 | Spectrum | 512-point real FFT with a periodic Hann window, peak-referenced dBFS and a dominant positive-frequency bin |
-| USB waveform export (opt-in experiment) | Verified CDC held-frame reads and host-requested Single captures on the reference board. See test results and bench limits above. |
+| USB and Windows Studio (opt-in experiment) | CDC waveform export, current settings, remote timebase and trigger controls, successive captures, and PC analysis. |
 | Storage (opt-in) | Save/load scope settings and save/restore DC calibration; waveform persistence is removed |
 
 The current storage profile reserves one 1 KiB Flash page at `0x0800FC00–0x0800FFFF` and gives the application 63 KiB. It stores scope settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved settings or calibration. CRC validation remains enabled.
 
-The fully enabled R6 bench image uses 64,408 of 64,512 application bytes, leaving 104 bytes. Reference-board checks covered Scope and Spectrum acquisition, immutable raw export, three restarts, USB session recovery and repeated MATLAB captures. The stock-board USB option remains experimental. See the [verification results](docs/release-readiness.md) and [build measurements](docs/building.md).
+The fully enabled Studio 2 bench image uses 64,496 of 64,512 application bytes, leaving 16 bytes. Reference-board checks covered standalone acquisition, remote settings, immutable raw export, USB session recovery and successive captures. The stock-board USB option remains experimental. See the [Studio 2 verification results](host/windows/VERIFICATION.md) and [build measurements](docs/building.md).
 
 Use SEL to reach Domain, then + for Spectrum or − for Scope. OK controls RUN/HOLD in both views. See the [Spectrum design and bench results](docs/spectrum-design.md).
 

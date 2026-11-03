@@ -28,7 +28,13 @@ enum class UsbOpcode : std::uint8_t {
     ReadSamples = 4U,
     EndFrame = 5U,
     CaptureSingle = 6U,
-    CancelCapture = 7U
+    CancelCapture = 7U,
+    GetSettings = 8U,
+    SetSettings = 9U,
+    CaptureSelected = 10U,
+    BeginFrameExtended = 11U,
+    SetTrigger = 12U,
+    HoldLocalRun = 13U
 };
 
 enum class UsbStatus : std::uint8_t {

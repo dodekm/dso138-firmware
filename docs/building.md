@@ -31,7 +31,11 @@ Historical measurement (before the 1 KiB storage profile and USB backend work): 
 
 Historical pre-USB verification: STM32CubeIDE headless imports built Release and Debug successfully and discovered the then-current 39 C++ sources, including FFT/spectrum and excluding rolling/filter modules. The existing non-LTO Capture override was retained. That image's callback-expanded stack audit bounded foreground plus conservative interrupt nesting at 1,544 bytes against the 2,048-byte minimum stack, leaving 504 bytes; the four alignment bytes were not counted as usable stack. These build and stack results do not cover the USB extension. See [Spectrum engineering](spectrum-design.md) for verification scope.
 
-Both configurations retain `-Os`, LTO with one partition, section garbage collection and the existing non-LTO Capture translation unit. They now enable `-fipa-pta` for more precise interprocedural pointer analysis; startup and terminal application fault handlers have cold-path hints. No ABI or floating-point semantics were changed.
+The R6 reference used `-Os`, one LTO partition, section garbage
+collection, and `-fipa-pta`. The Studio 2 project keeps those optimization
+passes and the existing non-LTO Capture translation unit. Its Debug and
+Release linker options use balanced LTO partitions and sort sections by
+alignment to reduce the USB-enabled image's load span.
 
 Controlled comparisons found no saving from `-Oz`, while `-O2` and the tested global no-inline settings were larger. On the same pending-event implementation before the cold-path hints, `-fipa-pta` reduced the load image from 61,520 to 61,304 bytes. The hints then reduced it to 61,280 bytes. A lossless packed-font prototype saved table bytes but increased total code size and was discarded. These are build-size observations, not speed measurements.
 
@@ -50,3 +54,20 @@ The verified CubeIDE run emitted 117 auxiliary `.su`/`.cyclo` make sidecar-targe
 The PDF manual illustrates the reference firmware interface. Use this repository's getting-started guide for the public source's per-board configuration and programming procedure.
 
 The current one-page format can lose previously saved settings or calibration if reset or power fails during an explicit save. The old layout is not migrated.
+
+### Configured Studio 2 firmware
+
+A clean CubeIDE 2.2.0 import with the same private board identity and
+USB bench options links to **64,496 bytes of application Flash**,
+leaving **16 bytes** before the storage page. Debug and Release
+produced byte-identical binaries. SRAM uses
+112 bytes of initialized data and
+13,136 bytes of BSS. The stack reservation stays at 2,048 bytes, leaving
+5,184 bytes of unallocated SRAM. The linker keeps the heap at zero.
+
+The current firmware borrows the held waveform under the controller's
+existing token, writes replies directly into the retry cache, and
+shares the foreground admission check. These changes make room for the
+live settings and acquisition commands. The configured build size
+includes those commands. See the [Studio 2 engineering plan](studio-2-design.md)
+for verification scope.

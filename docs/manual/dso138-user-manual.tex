@@ -137,7 +137,7 @@
 \end{minipage}\hfill
 \begin{minipage}[t]{0.47\linewidth}
   \coverlink{spectrum}{Spectrum view}\par
-  \coverlink{usb}{Experimental USB export}\par
+  \coverlink{usb}{Windows companion app}\par
   \coverlink{storage}{Settings and calibration storage}\par
   \coverlink{calibration}{Optional DC calibration}\par
   \coverlink{troubleshooting}{Troubleshooting}\par
@@ -390,32 +390,27 @@ No trace or an empty plot & Choose AUTO, return to RUN and wait for a record. Se
 
 If a button appears ignored, press only one at a time and release it fully before the next action. In Storage or Calibration, remember that the first \key{OK} may only stop acquisition. Use a second press after release to execute. Do not reset during a save.
 
-\manualpage{Experimental USB export}{usb}
+\manualpage{Windows companion app}{usb}
 
-\begin{manualnote}{Opt-in bench test}
-USB export has been tested on the reference board using the explicitly enabled \texttt{DSO\_USB\_STOCK\_BENCH\_TRIAL} profile (default off). The trial uses the board's fixed D+ pull-up and is not an electrically qualified production configuration. Power the scope from its normal 9\,V input; the USB cable carries data. The USB connection joins the instrument and PC grounds.
+\begin{manualnote}{USB firmware and electrical limits}
+DSO138 Studio 2 connects to firmware that implements waveform protocol v1 over USB CDC. The ordinary firmware profile disables USB; a cable or the Windows app cannot enable it. The documented stock-board trial explicitly enables the \texttt{DSO\_USB\_STOCK\_BENCH\_TRIAL} profile, which is off by default. It uses the board's fixed D+ pull-up and is not an electrically qualified production configuration. Power the scope from its normal 9\,V input; the USB cable carries data. USB joins the instrument and PC grounds.
 \end{manualnote}
 
-For the verified held-frame read, make a local capture with the scope controls and place the scope in HOLD. Wait until the record is complete. The MATLAB client reads the existing frame; it does not change scope settings or write Flash settings/calibration.
+\subsection*{Connect and acquire}
+\begin{enumerate}
+\item Extract the portable Windows x64 DSO138 Studio package to a writable folder. Keep \texttt{DSO138Studio.exe}, its Qt and runtime DLLs, and the \texttt{platforms} folder together. Start the app; its demonstration trace works without an instrument.
+\item Connect the scope by USB and select its COM port in Studio. Choose \textbf{Connect}. The firmware must expose protocol v1 as a Windows serial port.
+\item For a held download, capture with the physical controls and put the scope in HOLD, or use Studio's \textbf{Put scope in HOLD} action on firmware that supports remote HOLD. Wait for the record to complete.
+\item On compatible Studio 2 firmware, use the instrument settings panel to select a timebase and trigger mode, or apply trigger edge, level and position. Studio reports the acknowledged applied values. A local button press takes control back; closing or idling the connection restores the prior local selections. Coupling and sensitivity remain read-only because physical switches control them.
+\item Choose \textbf{Download held}, \textbf{Single}, \textbf{Repeat...} or \textbf{Start live}. Use \textbf{Freeze display} to inspect a record while later captures continue in history. Current instrument settings describe the connected scope; capture settings stay with the record that produced the waveform.
+\item Inspect measurements, cursors or the spectrum. Use \textbf{File > Save capture} for a lossless \texttt{.dso138} file or \textbf{File > Export CSV} for samples, timing, calibration and capture metadata.
+\end{enumerate}
 
-In MATLAB R2025b, use the COM port shown in Windows Device Manager. The verified reference setup appeared as \texttt{COM7}; replace \texttt{COMx} with the port assigned by your PC. Run from the repository root:
+Older R6 firmware supports held downloads, Single and Repeat. Live settings readback, remote settings and configured-trigger acquisition depend on compatible Studio 2 firmware. See \texttt{host/windows/README.md} for package details, controls and supported firmware behavior.
 
-\begin{quote}\ttfamily
-addpath("host/matlab")\par
-client = DsoUsbClient("COMx");\par
-cleanup = onCleanup(@() delete(client));\par
-frame = client.getHeldFrame();\par
-plot(frame.TimeSeconds, double(frame.Raw));\par
-xlabel("Time from trigger (s)");\par
-ylabel("ADC count");\par
-grid on;
-\end{quote}
+Studio live view uses successive complete records, not continuous sample streaming. Captures have acquisition, presentation and transfer gaps. In the reference-board Studio 2 test at 1\,ms/div, five complete records arrived at 4.84 records/s; the actual sample rate was about 102.27\,kS/s. This is a bounded result for that signal and setup, not a gap-free streaming rate or a guarantee for other timebases and PCs.
 
-Each frame contains 12-bit ADC codes, converted volts when available, and a time axis based on the capture timer. The verified record used nominal calibration kind 1. Its 1,024 samples used a configured interval of 2\,$\mu$s (72\,MHz divided by 144). Repeated reads of one held record matched. An earlier stock-board run also passed a four-second slow-host lease check.
-
-The client also exposes \texttt{capture} and \texttt{captureRepeated}. Put the scope in HOLD before requesting Single. The client waits for the scope to finish its foreground work. In the R6 bench run, MATLAB returned three distinct 1,024-sample records in 3.36\,s. A separate protocol test measured about 40--43\,kB/s of raw sample payload and verified cancellation and timeout cleanup. Repeated calls produce separate captures with acquisition and presentation gaps. See the MATLAB instructions and USB protocol documentation for setup and limits.
-
-The R6 bench image passed three debugger-controlled restarts with Windows CDC enumeration. After dropping DTR and reopening the serial port, the old lease token was rejected and a fresh download returned the same held record. Software tests cover USB bus suspend and resume handling.
+If the COM port is absent, check that the installed image has USB enabled and reconnect after closing other serial software. The reference-board R6 test verified restart and CDC reconnection; after reopening the port, an old transfer token was rejected and a fresh download returned the held record. USB bus suspend and resume are covered by software tests, not a board qualification.
 
 \manualpage{Reference and scope}{reference}
 

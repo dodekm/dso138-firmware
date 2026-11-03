@@ -37,7 +37,7 @@ Use the exact values from your MCU. Do not remove or bypass the identity, MCU-ty
 3. In STM32CubeProgrammer, connect over **SWD** and verify the detected MCU type and 64 KiB Flash capacity. Do not change option bytes.
 4. Program `firmware/Release/dso138.elf` through CubeProgrammer and perform a readback comparison.
 5. Preserve the final 1 KiB Flash page (`0x0800FC00–0x0800FFFF`) to keep saved settings or calibration. Avoid full-chip erase; it erases the page as well as the application.
-6. Disconnect SWD and power the instrument normally. Check startup, display and controls before connecting a signal.
+6. Perform a software reset so the MCU starts through its normal reset path. Then disconnect SWD and check startup, display and controls before connecting a signal.
 
 Build separately for each MCU; an image made with your UID is not a universal image. The [user manual (PDF)](manual/dso138-user-manual.pdf) and [editable LaTeX source](manual/dso138-user-manual.tex) cover the controls and operation.
 

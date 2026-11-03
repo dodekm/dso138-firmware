@@ -1,13 +1,20 @@
 # Changelog
 
+## Studio 2.0 and companion firmware
+
+- Add live instrument readback and remote timebase and trigger settings.
+- Add successive-capture live view with measured delivery intervals, frozen capture metadata, and bounded history.
+- Add PC-side measurements and windowed FFT analysis. Retain native capture and CSV export.
+- Improve host capture delivery by reusing the completed LCD scene in HOLD. The configured USB firmware leaves 16 bytes of application Flash.
+
 ## 2.0.0 — Spectrum and USB waveform export
 
 - Add a fixed 512-point real FFT with a periodic Hann window, dBFS display and dominant-bin readout. Spectrum reuses the stopped acquisition workspace.
-- Add opt-in USB CDC raw waveform export, host-requested Single captures and the MATLAB client. Export leases preserve raw ADC samples, timer settings and frozen calibration. The ordinary build keeps USB disabled.
+- Add opt-in USB CDC raw waveform export and host-requested Single captures. Export leases preserve raw ADC samples, timer settings and frozen calibration. The ordinary build keeps USB disabled.
 - Retain 18 triggered timebases (10 µs/div through 5 s/div), Auto/Normal/Single triggering, D3 indication and the remaining time-domain measurements.
 - Remove waveform save/recall, the 10–500 s/div rolling and filtered timebases, minimum/maximum voltage readouts and AC RMS. Settings and DC calibration use one CRC-checked 1 KiB page. See the [upgrade notes](docs/getting-started.md#upgrade-notes) for incompatible saved records.
 - Fit the fully enabled R6 profile in 64,408 bytes with 104 bytes of application headroom. Clean Release and Debug images match. The R6 linker omits unused global finalization arrays and retains startup constructors and explicit resource cleanup.
-- Verify target FFT, raw-record preservation, USB restarts and session recovery, repeated MATLAB captures and short acquisition tests under USB traffic. See [verification and limits](docs/release-readiness.md).
+- Verify target FFT, raw-record preservation, USB restarts and session recovery, repeated captures and short acquisition tests under USB traffic. See [verification and limits](docs/release-readiness.md).
 - Publish manual 2.0 as LaTeX source and a rendered PDF. The CubeIDE project builds directly and the `.ioc` serves as a partial hardware reference.
 
 ## 1.0.1 — Trigger LED indication
