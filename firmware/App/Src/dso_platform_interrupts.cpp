@@ -33,3 +33,10 @@ extern "C" void DMA1_Channel5_IRQHandler()
 {
     dso_app_lcd_dma_irq();
 }
+
+#if defined(DSO_BOARD_USB) && DSO_BOARD_USB
+extern "C" void USB_LP_CAN1_RX0_IRQHandler()
+{
+    dso_app_usb_irq();
+}
+#endif

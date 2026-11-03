@@ -2,6 +2,7 @@
 #define DSO_FIXED_RATIO_HPP
 
 #include <cstdint>
+#include "dso_u64_division.hpp"
 
 namespace dso::detail {
 
@@ -26,8 +27,9 @@ DSO_RATIO_NOINLINE MillionRatio million_ratio_wide(
 {
     constexpr std::uint64_t Scale{1000000U};
     static_assert(Scale <= UINT32_MAX);
-    const auto whole = numerator / denominator;
-    const auto fractional = numerator % denominator;
+    const auto divided = divide_u64(numerator, denominator);
+    const auto whole = divided.quotient;
+    const auto fractional = divided.remainder;
     std::uint32_t fractional_quotient{};
     std::uint64_t remainder{};
     // The processed scale prefix never exceeds 1,000,000. Since fractional
@@ -54,7 +56,8 @@ DSO_RATIO_ALWAYS_INLINE MillionRatio million_ratio(
     static_assert(Scale <= UINT32_MAX);
     if (numerator <= UINT64_MAX / Scale) {
         const auto product = numerator * Scale;
-        return {product / denominator, product % denominator};
+        const auto divided = divide_u64(product, denominator);
+        return {divided.quotient, divided.remainder};
     }
     return million_ratio_wide(numerator, denominator);
 }

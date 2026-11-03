@@ -1,4 +1,5 @@
 #include "dso_timebase.hpp"
+#include "dso_u64_division.hpp"
 
 #include <limits>
 
@@ -28,11 +29,11 @@ constexpr bool sampling_time_valid(std::uint16_t cycles_x2) noexcept
 }
 
 /* Avoid the overflow-prone (numerator + denominator - 1) idiom. */
-constexpr std::uint64_t divide_ceil(std::uint64_t numerator,
-                                    std::uint64_t denominator) noexcept
+std::uint64_t divide_ceil(std::uint64_t numerator,
+                          std::uint64_t denominator) noexcept
 {
-    return numerator / denominator +
-           ((numerator % denominator != 0U) ? std::uint64_t{1} : std::uint64_t{0});
+    const auto divided = detail::divide_u64(numerator, denominator);
+    return divided.quotient + (divided.remainder != 0U ? std::uint64_t{1} : std::uint64_t{0});
 }
 
 } // namespace

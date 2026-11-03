@@ -17,12 +17,6 @@ struct AcquisitionRequest final {
     DmaRingConfig dma;
     std::uint32_t epoch;
 };
-enum class SampleProcessingKind : std::uint8_t { Point, Filtered25 };
-struct SampleProcessing final {
-    SampleProcessingKind kind{SampleProcessingKind::Point};
-    bool source_clipped{}; // A raw rail hit contributed to this filtered window.
-    bool output_clamped{}; // FIR overshoot exceeded the output ADC code range.
-};
 struct FrameMetadata final {
     PhysicalSettings physical;
     TimebasePlan timing;
@@ -30,7 +24,6 @@ struct FrameMetadata final {
     std::uint32_t acquisition_epoch;
     std::uint32_t trigger_sequence;
     bool edge_triggered;
-    SampleProcessing processing{};
 };
 enum class AcquisitionState { Stopped, Running, Ready, Fault };
 enum class AcquisitionFault { None, Transport, InvalidSamples, PhysicalChange, PortFailure, Protocol };

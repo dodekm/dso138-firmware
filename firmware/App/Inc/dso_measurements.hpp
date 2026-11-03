@@ -30,23 +30,17 @@ struct MeasurementResult final {
     std::uint16_t rail_high_samples{};
     std::uint32_t mean_code_q16{};
     std::uint32_t rms_code_q16{}; // RMS about ADC code zero, not input zero.
-    std::uint32_t ac_rms_code_q16{}; // RMS about the finite-record mean.
-    std::int64_t minimum_microvolts{};
-    std::int64_t maximum_microvolts{};
     std::int64_t mean_microvolts{};
     std::uint64_t peak_to_peak_microvolts{};
-    std::uint64_t peak_microvolts{}; // max(abs(min), abs(max)); NOT half Vpp.
+    std::uint64_t peak_microvolts{}; // maximum absolute extrema; not half Vpp.
     std::uint64_t rms_microvolts{}; // Total RMS about supplied calibration zero.
-    std::uint64_t ac_rms_microvolts{};
     std::uint64_t frequency_microhertz{}; // Primary rounded rate; Valid requires positive uHz.
     std::uint64_t frequency_millihz{}; // Legacy independently rounded rate; may be0 when Valid.
     std::uint16_t periods{};
     std::uint32_t minimum_period_q16{};
     std::uint32_t maximum_period_q16{};
     FrequencyStatus frequency_status{FrequencyStatus::InsufficientCycles};
-    bool adc_clipped{}; // Output rails, contributing raw rails or filter clamp.
-    bool source_clipped{}; // Raw ADC rails can be hidden by filtering.
-    bool filter_clamped{};
+    bool adc_clipped{}; // One or more raw ADC samples reached a rail.
     bool voltage_available{}; // Explicit Nominal/Measured profile supplied.
     bool amplitude_valid{}; // voltage_available and no observed ADC rail hits.
     bool input_ac_coupled{}; // Input DC removed by front-end, not recovered here.

@@ -11,6 +11,8 @@
 #include "dso_stm32_storage.hpp"
 #include "dso_timebase.hpp"
 #include "dso_ui_controller.hpp"
+#include "dso_usb_board.hpp"
+#include "dso_usb_service.hpp"
 #include "main.h"
 #ifndef DSO_BOARD_QUALIFICATION_COMMANDS
 #define DSO_BOARD_QUALIFICATION_COMMANDS 0
@@ -102,6 +104,13 @@ constexpr dso::Stm32StorageQualification DormantStorageQualification{false, fals
 constexpr dso::Stm32StorageQualification StorageBenchAssumptions{true, true, true, true, true};
 #endif
 dso::ScopeController scope_controller{acquisition, screen, DormantUiConfig};
+#if DSO_BOARD_USB
+dso::Stm32UsbDevice usb_device{};
+dso::UsbProtocolService usb_service{scope_controller, usb_device.stream_port()};
+constexpr std::size_t UsbStaticBytes{sizeof(usb_device) + sizeof(usb_service)};
+#else
+constexpr std::size_t UsbStaticBytes{};
+#endif
 #if DSO_BOARD_QUALIFICATION_COMMANDS
 // This RAM-only mailbox has no application-storage binding or qualification
 // effect. Bring-up's existing startup gate checks the exact UID before idle.
@@ -123,7 +132,7 @@ bool route_qualification_action(void* context, dso::QualificationAction action) 
 static_assert(sizeof(dso::DmaAcquisition) < 6U * 1024U, "Revisit 20KiB SRAM budget");
 static_assert(sizeof(acquisition) + sizeof(panel_sampler) + sizeof(front_panel) + sizeof(panel_suspension) +
     sizeof(display) + sizeof(screen) + sizeof(scope_controller) + sizeof(calibration_bank) +
-    sizeof(snapshot_storage) + sizeof(scope_storage) < 16U * 1024U,
+    sizeof(snapshot_storage) + sizeof(scope_storage) + UsbStaticBytes < 16U * 1024U,
     "Leave SRAM for HAL state, the reserved stack and interrupt headroom");
 }
 
@@ -141,6 +150,11 @@ extern "C" void dso_app_fault(std::uint32_t reason)
     // later idle/init calls cannot start work or turn a fault into a healthy boot.
     dso_bench_status.fault = reason;
     dso_bench_status.phase = DSO_BENCH_FAULT;
+#if DSO_BOARD_USB
+    usb_device.stop();
+    // A zero transport session ends only USB-owned capture/export leases.
+    usb_service.step(HAL_GetTick());
+#endif
     dso::cancel_stm32_trigger_led();
     // End an outstanding LCD DMA borrow before any foreground owner can be
     // destroyed/reused. With no active transfer this performs no bus access.
@@ -219,6 +233,11 @@ extern "C" void dso_app_init(void)
     dso_bench_status.panel_sampler_bytes = sizeof(panel_sampler);
     dso_bench_status.ui_bytes = sizeof(front_panel) + sizeof(panel_suspension) + sizeof(display) + sizeof(screen) + sizeof(scope_controller);
     dso_bench_status.calibration_bank_bytes = sizeof(calibration_bank);
+#if DSO_BOARD_USB
+    // Start USB before the panel sampler. The stock bench profile briefly
+    // disconnects PA12 so a host already attached to the device re-enumerates.
+    static_cast<void>(usb_device.start(dso::UsbBoardQualification));
+#endif
 #if DSO_BOARD_ACQUISITION
     if (!panel_sampler.start()) { dso_app_fault(8U); return; }
     dso::dso_bringup_acquisition.ready_ms = HAL_GetTick();
@@ -270,6 +289,12 @@ extern "C" void dso_app_idle(void)
     }
 #endif
     const auto ui_progress = scope_controller.service();
+#if DSO_BOARD_USB
+    // Physical controls and producer service have priority over PC requests.
+    // USB class events and protocol input are separate, bounded foreground work.
+    usb_device.poll();
+    usb_service.step(now);
+#endif
     // Always drain both owner flags; events are discarded while the UI is unhealthy.
     const bool accepted_edge = acquisition.take_accepted_edge();
     dso::service_stm32_trigger_led(now, accepted_edge,
@@ -317,4 +342,11 @@ extern "C" int dso_app_dma_irq(void)
 {
     dso::stm32_acquisition_dma_irq();
     return 1;
+}
+
+extern "C" void dso_app_usb_irq(void)
+{
+#if DSO_BOARD_USB
+    usb_device.irq_notify();
+#endif
 }

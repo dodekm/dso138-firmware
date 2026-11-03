@@ -1,4 +1,5 @@
 #include "dso_calibration.hpp"
+#include "dso_u64_division.hpp"
 #include "dso_voltage_math.hpp"
 
 namespace dso {
@@ -40,8 +41,9 @@ bool valid_point(const CalibrationPoint& point) noexcept
 std::int64_t round_div(std::int64_t numerator, std::uint64_t denominator) noexcept
 {
     const auto magnitude = static_cast<std::uint64_t>(numerator < 0 ? -numerator : numerator);
-    const auto rounded = magnitude / denominator +
-        (magnitude % denominator >= (denominator + 1U) / 2U ? 1U : 0U);
+    const auto divided = detail::divide_u64(magnitude, denominator);
+    const auto rounded = divided.quotient +
+        (divided.remainder >= (denominator + 1U) / 2U ? 1U : 0U);
     return numerator < 0 ? -static_cast<std::int64_t>(rounded) : static_cast<std::int64_t>(rounded);
 }
 
@@ -126,8 +128,9 @@ bool CalibrationFit::begin(const CalibrationPoint& first, const CalibrationPoint
     const auto abs_delta_code = static_cast<std::uint64_t>(delta_code < 0 ? -delta_code : delta_code);
     const auto abs_delta_voltage = static_cast<std::uint64_t>(delta_voltage < 0 ? -delta_voltage : delta_voltage);
     const auto numerator = abs_delta_voltage << 32U;
-    const auto quotient = numerator / abs_delta_code;
-    const auto remainder = numerator % abs_delta_code;
+    const auto divided = detail::divide_u64(numerator, abs_delta_code);
+    const auto quotient = divided.quotient;
+    const auto remainder = divided.remainder;
     const auto rounded_shift0 = quotient + (remainder >= (abs_delta_code + 1U) / 2U ? 1U : 0U);
     if (rounded_shift0 != 0U && rounded_shift0 <= UINT32_MAX) {
         gain = static_cast<std::uint32_t>(rounded_shift0);

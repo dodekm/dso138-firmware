@@ -45,7 +45,7 @@
 \fancyhf{}
 \fancyhead[L]{\small\bfseries\color{navy}DSO138}
 \fancyhead[R]{\small\color{muted}USER MANUAL}
-\fancyfoot[L]{\footnotesize\color{muted}Manual 1.3 \enspace|\enspace Firmware: unreleased revision}
+\fancyfoot[L]{\footnotesize\color{muted}Manual 1.8 \enspace|\enspace Firmware: unreleased revision}
 \fancyfoot[R]{\footnotesize\color{muted}\thepage\,/\,\pageref*{LastPage}}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
@@ -137,14 +137,15 @@
 \end{minipage}\hfill
 \begin{minipage}[t]{0.47\linewidth}
   \coverlink{spectrum}{Spectrum view}\par
-  \coverlink{storage}{Save, recall and settings}\par
+  \coverlink{usb}{Experimental USB export}\par
+  \coverlink{storage}{Settings and calibration storage}\par
   \coverlink{calibration}{Optional DC calibration}\par
   \coverlink{troubleshooting}{Troubleshooting}\par
   \coverlink{reference}{Reference and scope}\par
 \end{minipage}
 \vfill
 {\small\color{muted}
-Manual revision 1.3 \enspace|\enspace 2 November 2026\par
+  Manual revision 1.8 \enspace|\enspace 3 November 2026\par
 Firmware source: unreleased revision (UID-configured build required)\par
 Intended hardware: PCB 109-13800-00C, STM32F103C8T6, ILI9341 display.\par
 This guide describes the implemented controls and functions.
@@ -169,7 +170,7 @@ This operating guide assumes a correctly configured firmware image. The current 
 \end{enumerate}
 The observed board showed about 3.3 vertical divisions and a frequency near 1 kHz in this setup. This is a functional check, not a guaranteed voltage, frequency standard, or calibration reference.
 
-On power-up, saved valid settings return in HOLD; press \key{OK} to run. If there are no saved settings, the enabled board profile requests Auto run after the physical switches settle. Waveform recall is always a separate, explicit action. Allow the display to show a record before judging a signal.
+On power-up, saved valid settings return in HOLD; press \key{OK} to run. If there are no saved settings, the enabled board profile requests Auto run after the physical switches settle. Waveform save and recall are not available. Allow the display to show a record before judging a signal.
 
 \textbf{The three slide switches set the analog input.} Their positions physically select coupling and sensitivity. Software settings cannot move them. After changing a switch, wait for the on-screen status to leave \lcd{WAIT INPUT} or \lcd{Switches settling} before using a new record.
 
@@ -203,7 +204,7 @@ The separate coupling switch selects DC, AC, or GND.
 The table gives the nine nominal ranges. The separate coupling switch selects DC (shows the input offset), AC (blocks DC), or GND (selects the internal ground path). These are front-panel sensitivity labels. They do not confirm the input voltage or a probe's attenuation. If using a \(\times10\) probe, account for that factor yourself; there is no probe-attenuation menu.
 
 \subsection*{Trigger activity LED}
-D3 gives a brief, about 100 ms indication for an accepted trigger crossing; another crossing restarts the pulse, so close events may look continuously lit. Auto free-run timeout and recall/HOLD redraw do not light it. A Single pulse can finish through automatic HOLD; faults leave it off. This software cue is not a precise timing strobe and has not been tested on hardware.
+D3 gives a brief, about 100 ms indication for an accepted trigger crossing; another crossing restarts the pulse, so close events may look continuously lit. Auto free-run timeout and HOLD redraw do not light it. A Single pulse can finish through automatic HOLD; faults leave it off. The indicator has been observed working on the reference instrument; its pulse timing has not been instrument-measured, so it is not a precise timing strobe.
 
 \manualpage{Reading the screen}{screen}
 
@@ -235,7 +236,7 @@ Trigger position & 0 to 100\%, 2.5\% steps & Run/Hold; Single rearm \\
 Vertical position & Move reference, 2-pixel steps & Run/Hold; Single rearm \\
 Horizontal position & Pan, 16-sample steps & Run/Hold; Single rearm \\
 Measurements & Overview, Amplitude, RMS/Mean, Freq & Run/Hold \\
-Storage & Choose one of six actions & Stop, then execute \\
+Storage & Choose one of four actions & Stop, then execute \\
 Calibration reference & Set signed reference value & Stop, then cycle step \\
 Calibration tolerance & Set allowed error & Stop, then cycle step \\
 Calibration & Begin, Accept Ref, Install, Abort & Stop, then execute \\
@@ -255,7 +256,7 @@ For Storage and Calibration, if acquisition is running, the first \key{OK} chang
 
 Choose rising or falling edge in Trigger edge. Trigger level changes in 16 ADC-code steps; it is a code threshold, not a calibrated voltage setting. Trigger position moves from 0\% to 100\% of the record in 2.5\% steps, selecting how much history lies before the trigger in ordinary triggered captures.
 
-Timebase, trigger mode, edge, level and trigger position affect capture. Changing them during a run invalidates the incomplete record. On a held or recalled trace, timebase changes zoom the existing samples; they do not resample the waveform. Areas outside the captured record remain empty. Vertical \key{+} moves the reference down; \key{\char45} moves it up. Horizontal \key{+} pans toward later source samples; \key{\char45} pans toward earlier samples, in 16-sample steps. These view adjustments do not make a new capture.
+Timebase, trigger mode, edge, level and trigger position affect capture. Changing them during a run invalidates the incomplete record. On a held trace, timebase changes zoom the existing samples; they do not resample the waveform. Areas outside the captured record remain empty. Vertical \key{+} moves the reference down; \key{\char45} moves it up. Horizontal \key{+} pans toward later source samples; \key{\char45} pans toward earlier samples, in 16-sample steps. These view adjustments do not make a new capture.
 
 \subsection*{Example: trigger position at 50\%}
 \begin{center}
@@ -276,31 +277,29 @@ Use HOLD to inspect a stable record, then RUN to resume. With AC coupling, the i
 
 \manualpage{Measurements and validity}{measurements}
 
-Measurements cover the complete finite record, not just the visible portion or a hand-selected cycle. The four measurement pages are Overview, Amplitude, RMS/Mean and Freq.
+Measurements cover the complete finite record, not just the visible portion or a hand-selected cycle. The four measurement pages are Overview, Amplitude, RMS/Mean and Freq. Amplitude reports peak-to-peak only; RMS/Mean reports total RMS and the arithmetic mean. The scope measurement-focus line also shows absolute peak magnitude when voltage conversion is available.
 
 \begin{tabularx}{\linewidth}{@{}p{0.25\linewidth}X@{}}
 \toprule
 Screen item & Meaning \\
 \midrule
-MIN, MAX & Lowest and highest sampled values in the record. \\
-PP & Peak-to-peak, the difference between maximum and minimum. \\
-PK & Peak magnitude from the voltage zero; it is not necessarily half of PP when a DC offset is present. \\
-RMS & Total RMS about the calibration zero, including DC. \\
-AC, AC-RMS & RMS after subtracting the record mean. \\
-MEAN, AVG & Arithmetic mean of the record. \\
+PP & Peak-to-peak voltage on the Amplitude page. \\
+PK & Absolute peak voltage from the conversion zero, shown on the scope measurement-focus line. With a DC offset, it is not necessarily half of PP. \\
+RMS & Total RMS about the calibration zero, including DC, on the RMS/Mean page. \\
+MEAN & Arithmetic mean on the RMS/Mean page. \\
 F & Detected repetition rate, when valid. \\
 \bottomrule
 \end{tabularx}
 
-With \lcd{RAW}, the display reports ADC codes (marked \lcd{c}) rather than input volts. \lcd{NOM} uses the board's nominal conversion coefficients. \lcd{CAL} means an installed measured DC profile is being used. A displayed voltage is a converted estimate, not an accuracy guarantee. AC-coupled mean and total RMS describe the AC-coupled signal; they cannot restore removed DC.
+With \lcd{RAW}, the display reports ADC counts (marked \lcd{c}) rather than input volts. \lcd{NOM} uses the board's nominal conversion coefficients. \lcd{CAL} means an installed measured DC profile is being used. A displayed voltage is a converted estimate, not an accuracy guarantee. AC-coupled mean and total RMS describe the AC-coupled signal; they cannot restore removed DC.
 
 Frequency needs at least three qualified complete periods. A clear trace can still show \lcd{\char45\kern0pt\char45\ CYCLES} when it is too short. Other reasons can include low amplitude, instability, clipping, grounding or a rate outside estimator limits. Frequency is observed repetition, not proof of the signal's fundamental frequency. Aliasing can produce a plausible but incorrect value.
 
-An ADC rail hit suppresses valid amplitude and frequency claims; the scope view may show \lcd{ADC CLIP}, \lcd{RAW ADC CLIP}, or \lcd{F \char45\kern0pt\char45 CLIP; volts invalid}. A missing voltage profile gives \lcd{RAW: no volts}. Stop and correct the input/range before relying on another record. Clipping can add harmonics to the Spectrum view; it has no separate clipping warning, so check the same record in Scope view. As a mathematical illustration only, an ideal 0-to-3.3 V, 50\% duty square wave has 3.3 V PP, 1.65 V mean, 2.33 V total RMS and 1.65 V AC RMS. These calculated values are not a test or specification of the onboard output.
+An ADC rail hit suppresses valid amplitude and frequency claims; the scope view may show \lcd{ADC CLIP}, \lcd{RAW ADC CLIP}, or \lcd{F \char45\kern0pt\char45 CLIP; volts invalid}. A missing voltage profile gives \lcd{RAW: no volts}. Stop and correct the input/range before relying on another record. Clipping can add harmonics to the Spectrum view; it has no separate clipping warning, so check the same record in Scope view. As a mathematical illustration only, an ideal 0-to-3.3 V, 50\% duty square wave has 3.3 V PP, 1.65 V mean and 2.33 V total RMS. These calculated values are not a test or specification of the onboard output.
 
 \manualpage{Spectrum view}{spectrum}
 
-Spectrum view analyzes 512 consecutive samples from a completed, frozen record. The calculation uses the record's known timer rate and the same sample block throughout. With RUN active, a new completed capture produces a refreshed spectrum; analysis runs after capture, not while the ADC is sampling. HOLD and recalled records can also be viewed. A record must contain at least 512 samples and have known timing.
+Spectrum view analyzes 512 consecutive samples from a completed, frozen record. The calculation uses the record's known timer rate and the same sample block throughout. With RUN active, a new completed capture produces a refreshed spectrum; analysis runs after capture, not while the ADC is sampling. HOLD records can also be viewed. A record must contain at least 512 samples and have known timing.
 
 The analyzer subtracts the block mean and applies a fixed periodic Hann window before the 512-point FFT. Mean removal suppresses DC, so a constant or zero input has no positive-frequency peak and the readout shows \lcd{Peak \char45\kern0pt\char45}. The Hann window reduces leakage from tones between frequency bins, while spreading a tone over nearby bins. The peak readout uses the strongest positive-frequency bin without interpolation, so its frequency is quantized in steps of \(\Delta f = F_s/512\).
 
@@ -319,35 +318,33 @@ dBFS uses a peak reference of 2048 ADC codes: 0 dBFS corresponds to a 2048-code 
 Nyquist is the highest frequency represented without folding for the sampled block. Higher-frequency energy can alias into the displayed band and appear as a plausible lower-frequency peak; the Hann window does not prevent aliasing. Use suitable analog bandwidth limits ahead of the ADC when the signal may contain energy above Nyquist. ADC clipping can create harmonics that look like real signal components. Spectrum view has no clipping warning; check the same record in Scope view for its ADC clipping status.
 
 \begin{manualnote}{Accessing the spectrum}
-Use \key{SEL} to focus Domain, then press \key{+} for Spectrum or \key{\char45} for Scope. In RUN, each new complete record is analyzed after capture; in HOLD, the current or recalled record remains available. The Domain choice is not stored by \lcd{SAVE CONFIG} and resets to Scope after restart.
+Use \key{SEL} to focus Domain, then press \key{+} for Spectrum or \key{\char45} for Scope. In RUN, each new complete record is analyzed after capture; in HOLD, the current record remains available. The Domain choice is not stored by \lcd{SAVE CONFIG} and resets to Scope after restart.
 \end{manualnote}
 
-\manualpage{Saving, loading and recalling}{storage}
+\manualpage{Settings and calibration storage}{storage}
 
-Storage offers six actions in the Storage field. Select one with \key{+}/\key{\char45}; waveform saving requires a complete, fully processed held record. A valid recalled record may also be saved. If running, press \key{OK}, release, then press it again to execute. Wait for \lcd{SAVED} after a save before changing power or resetting.
+Storage has four actions. Select one with \key{+}/\key{\char45}. If acquisition is running, the first \key{OK} changes to HOLD; release the button, then press \key{OK} again to execute. Wait for \lcd{SAVED} after a save before changing power or resetting.
 
 \begin{tabularx}{\linewidth}{@{}p{0.27\linewidth}X@{}}
 \toprule
 Displayed action & What it does \\
 \midrule
-\lcd{SAVE WAVE} & Store the latest complete waveform and current eight scope settings in the single waveform slot, with captured timing, physical and calibration metadata. \\
-\lcd{RECALL WAVE} & Restore the saved settings and record together as a held view. Recall is explicit; it does not install its calibration into the live bank. \\
-\lcd{SAVE CONFIG} & Save the eight scope settings (timebase, trigger mode/edge/level/position, vertical/horizontal position and measurement page). It preserves the waveform slot. \\
-\lcd{LOAD CONFIG} & Restore saved UI settings. The restored settings start in HOLD. \\
-\lcd{SAVE CAL} & Persist the currently installed calibration bank. \\
-\lcd{RESTORE CAL} & Restore the saved calibration bank into the live profile. A valid calibration bank is also restored at boot. \\
+\lcd{SAVE CONFIG} & Save the eight scope settings: timebase, trigger mode/edge/level/position, vertical/horizontal position and measurement page. Domain is session-only. \\
+\lcd{LOAD CONFIG} & Restore saved scope settings. The restored settings start in HOLD. \\
+\lcd{SAVE CAL} & Persist the currently installed DC calibration profile. \\
+\lcd{RESTORE CAL} & Restore the saved DC calibration profile into the live profile. A valid profile is also restored at boot. \\
 \bottomrule
 \end{tabularx}
 
-To save a trace: obtain a complete record, press \key{OK} to HOLD if necessary, select \lcd{SAVE WAVE}, then execute with a fresh \key{OK}. This stores the waveform and its current scope settings together. To recall: select \lcd{RECALL WAVE} in HOLD and execute; the saved record and settings return together in HOLD. To save settings alone without replacing the waveform slot, select \lcd{SAVE CONFIG}. Reference and tolerance editor values are not part of the eight saved scope settings; calibration persistence is separate through \lcd{SAVE CAL}.
+Waveform save and recall are not available. The saved settings do not include the Domain choice or Reference/Tolerance editor values. Calibration persistence is separate from settings persistence.
 
-\begin{manualnote}{Single-bank flash warning}
-Saved records occupy one 2\,KiB storage region in the device flash. A reset or power loss during flash erase/program can lose the waveform, settings or calibration. Do not interrupt a save; wait for \lcd{SAVED}. Completed \lcd{SAVE CONFIG} and \lcd{SAVE CAL} operations normally preserve the waveform; \lcd{SAVE WAVE} replaces it. The lower-bank area used by older firmware now holds the application, and migration of older saved data is not guaranteed.
+\begin{manualnote}{Flash storage and interruption}
+Storage uses one 1\,KiB Flash page at \texttt{0x0800FC00--0x0800FFFF}. The current records use at most 272 bytes: a 32-byte envelope, a 36-byte settings record and up to 204 bytes of calibration data, leaving 752 bytes unused. CRC, readback and commit validation reject incomplete records.
+
+The page is not erased automatically at boot. Explicit \lcd{SAVE CONFIG} or \lcd{SAVE CAL} erases/programs the page. Reset or power loss during that operation can lose the previous saved settings or calibration; wait for \lcd{SAVED}. The older storage layout is not migrated, and its previous data is not preserved.
 \end{manualnote}
 
-Flash endurance is finite. Avoid repeated unnecessary saves. Physical interruption recovery and endurance have not been fully qualified. \lcd{HOLD TO SAVE} means first obtain and hold a complete processed record. A recalled waveform cannot be used as an applied calibration reference.
-
-Records saved with one of the removed 10 s/div through 500 s/div timebase indices are not recalled by this firmware. Opening such a record does not erase or rewrite it. An explicit save of supported settings, a waveform, or calibration can replace the single storage slot.
+Flash endurance is finite; avoid unnecessary saves. Storage interruption recovery and endurance have not been fully qualified.
 
 \manualpage{Optional DC calibration}{calibration}
 
@@ -376,7 +373,7 @@ Screen status or symptom & What to do \\
 No trace or an empty plot & Choose AUTO, return to RUN and wait for a record. Set vertical and horizontal position to zero; a panned or zoomed held view can lie outside the captured data. \\
 \lcd{WAIT INPUT}, \lcd{Switches settling} & Check the physical slide-switch positions and allow them to settle. \\
 \lcd{WAIT TRIG} & In Normal or Single, check that the input crosses the selected trigger level and edge. \\
-\lcd{FFT NEEDS FROZEN FRAME} & In RUN, wait for a complete capture; check the trigger if it is waiting. A held or recalled record also works. \\
+\lcd{FFT NEEDS FROZEN FRAME} & In RUN, wait for a complete capture; check the trigger if it is waiting. A held record also works. \\
 \lcd{FFT NEEDS HELD UNIFORM BLOCK}, \lcd{FFT NEEDS 512 SAMPLES} & Wait for capture to finish, or use a held record with at least 512 uniformly timed samples. \\
 \lcd{FFT TIMING UNKNOWN} & Select a timebase with a valid timer plan, then acquire a fresh record. \\
 \lcd{Peak \char45\kern0pt\char45} & The mean-removed block has no nonzero positive-frequency bin. A DC-only input is removed before analysis. \\
@@ -392,6 +389,33 @@ No trace or an empty plot & Choose AUTO, return to RUN and wait for a record. Se
 \end{tabularx}
 
 If a button appears ignored, press only one at a time and release it fully before the next action. In Storage or Calibration, remember that the first \key{OK} may only stop acquisition. Use a second press after release to execute. Do not reset during a save.
+
+\manualpage{Experimental USB export}{usb}
+
+\begin{manualnote}{Opt-in bench test}
+USB export has been tested on the reference board using the explicitly enabled \texttt{DSO\_USB\_STOCK\_BENCH\_TRIAL} profile (default off). The trial uses the board's fixed D+ pull-up and is not an electrically qualified production configuration. Power the scope from its normal 9\,V input; the USB cable carries data. The USB connection joins the instrument and PC grounds.
+\end{manualnote}
+
+For the verified held-frame read, make a local capture with the scope controls and place the scope in HOLD. Wait until the record is complete. The MATLAB client reads the existing frame; it does not change scope settings or write Flash settings/calibration.
+
+In MATLAB R2025b, use the COM port shown in Windows Device Manager. The verified reference setup appeared as \texttt{COM7}; replace \texttt{COMx} with the port assigned by your PC. Run from the repository root:
+
+\begin{quote}\ttfamily
+addpath("host/matlab")\par
+client = DsoUsbClient("COMx");\par
+cleanup = onCleanup(@() delete(client));\par
+frame = client.getHeldFrame();\par
+plot(frame.TimeSeconds, double(frame.Raw));\par
+xlabel("Time from trigger (s)");\par
+ylabel("ADC count");\par
+grid on;
+\end{quote}
+
+\texttt{frame.Raw} contains 12-bit ADC codes and \texttt{frame.TimeSeconds} uses the capture timer metadata. \texttt{frame.VoltageVolts} is empty when voltage conversion is unavailable. The verified frame reported nominal calibration kind 1, not a measured calibration profile. The smoke check verified a 1,024-sample held-frame read at 2\,$\mu$s/sample (72\,MHz divided by 144). Two RAW reads of the same held frame produced matching hashes, and a four-second slow-host frame lease passed. Windows showed a CDC COM port without a driver error.
+
+The client also exposes \texttt{capture} and \texttt{captureRepeated}. Before requesting Single, the scope must be in HOLD with foreground work idle; the host does not take over a running scope. On R5, three host captures used jobs 1--3 and epochs 786--788. Acknowledgments took 0.47--1.05\,ms; completion took 160.23\,ms for the first request (including a Busy readiness retry), then 80.62 and 81.91\,ms. RAW downloads took 47.57--53.06\,ms (38.60--43.05\,kB/s). Cancel returned \texttt{Cancelled}; a 1\,ms timeout returned \texttt{Timeout} and left the job \texttt{Cancelled}. MATLAB \texttt{captureRepeated(3,uint32(3000),0)} passed on both R4 (epochs 20--22, 2.944\,s total) and R5 (epochs 793--795, 2.524\,s total), with three valid 1,024-sample Single frames per run. The client waited for readiness before each download. Repeated calls are separate captures with acquisition/presentation gaps; no continuous or gap-free behavior is claimed. See \texttt{host/matlab/README.md}, \texttt{docs/usb-hardware.md} and \texttt{docs/usb-protocol.md} for current setup and limits.
+
+Three automatic USB restart checks passed on R5. An intermittent failure was traced to EP0 reporting \texttt{TYPE\_MASK == 0} before the bus RESET flag became visible; this reset image could make an endpoint-status verification fail. The driver now defers endpoint status updates for that reset image and rebuilds EP0 as CONTROL during reset service.
 
 \manualpage{Reference and scope}{reference}
 
@@ -411,11 +435,11 @@ This firmware supports 18 triggered settings from 10\,$\mu$s/div to 5\,s/div. Th
 \textbf{Voltage and probe limits.} Nominal range labels and \lcd{NOM} conversion use board coefficients; they are not a production calibration. \lcd{CAL} indicates a measured profile is installed, but does not replace independent verification. \lcd{RAW} provides codes, not input volts. No probe attenuation is selected by firmware; multiply displayed input estimates by the probe factor when applicable. Do not treat the onboard signal as an absolute reference. No maximum safe input is specified here: follow the board's own input markings and limits.
 
 \begin{manualnote}{Firmware identity and qualification}
-The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks. Those checks and earlier hardware observations do not qualify the current spectrum revision. The current unreleased source revision changes saved-data layout to a single flash bank and adds a software FFT display; these changes have not been flashed or tested on hardware. This change does not complete physical production qualification. Independent voltage, frequency, bandwidth, loaded timing, FFT analog accuracy, alias response and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
+The operating and qualification observations in this manual refer to the previously deployed b73 firmware image on the identified board profile, with nominal gain-2 coefficients and a grounded-zero code; its reported build image SHA-256 begins \texttt{b73cdcb1c644}. Public firmware source release 1.0.1 adds the trigger activity LED described under Controls. Its LED pulse, acquisition handoff and startup/fault sequencing passed software checks. The R4 stock-trial USB image passed Windows CDC enumeration, held-frame export, three host-requested Single captures, cancellation and timeout checks as described under Experimental USB export. The R5 image passed three automatic USB restart checks. These results do not establish electrical production compliance or gap-free acquisition. The ordinary source profile keeps USB disabled. The R5 image uses 64,456 bytes of the 64,512-byte application region, leaving 56 bytes. Its measured SRAM accounting is 112 bytes of .data, 13,192 bytes of .bss, and a 2,048-byte stack reservation, with 5,128 bytes unallocated and no heap. The current source revision also uses a 1\,KiB settings/calibration page without legacy-data migration and includes a software FFT display. The journal uses at most 272 bytes (32-byte envelope plus a 240-byte settings/calibration payload). Physical USB compliance, analog timing and FFT accuracy remain unqualified. Independent voltage, frequency, bandwidth, alias response and long-term storage qualification remain open. Use the instrument as a functional oscilloscope with these limits in mind, not as a calibrated laboratory instrument.
 \end{manualnote}
 
-\vfill
-\begin{center}\footnotesize Manual revision 1.3: 2 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, \texttt{firmware/App/Src/dso\_spectrum.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
+  \vfill
+  \begin{center}\footnotesize Manual revision 1.8: 3 November 2026. Operator reference sources: \texttt{firmware/App/Src/dso\_ui\_model.cpp}, \texttt{firmware/App/Src/dso\_ui\_controller.cpp}, \texttt{firmware/App/Src/dso\_scaling.cpp}, \texttt{firmware/App/Src/dso\_spectrum.cpp}, and \texttt{firmware/App/Inc/dso\_timebase\_presets.hpp}.\end{center}
 
 
 \end{document}

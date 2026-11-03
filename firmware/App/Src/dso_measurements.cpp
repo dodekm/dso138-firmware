@@ -1,4 +1,5 @@
 #include "dso_measurements.hpp"
+#include "dso_u64_division.hpp"
 #include "dso_voltage_math.hpp"
 #include "dso_fixed_ratio.hpp"
 
@@ -15,19 +16,20 @@ std::uint64_t frequency_rates(std::uint64_t numerator, std::uint64_t denominator
     const auto ratio = detail::million_ratio(numerator, denominator);
     // Use the unrounded microhertz quotient: rounding it first can move a
     // value just below a millihertz half-step onto the wrong side of it.
-    millihertz = (ratio.quotient + 500U) / 1000U;
+    millihertz = detail::divide_u64(ratio.quotient + 500U, 1000U).quotient;
     return ratio.quotient + (ratio.remainder >= (denominator + 1U) / 2U ? 1U : 0U);
 }
 
 std::uint64_t rational_q32(std::uint64_t numerator, std::uint64_t denominator) noexcept
 {
     // Used with denominator<=1024^2 and quotient<=4095^2; both shifts fit.
-    return (numerator / denominator) * Q32 + (numerator % denominator) * Q32 / denominator;
+    const auto divided = detail::divide_u64(numerator, denominator);
+    return divided.quotient * Q32 + detail::divide_u64(divided.remainder * Q32, denominator).quotient;
 }
 
 std::uint32_t square_root_code_q32(std::uint64_t value) noexcept
 {
-    // All callers pass a Q32 mean square in code units. For raw RMS and AC RMS,
+    // All callers pass a Q32 mean square in code units. For raw RMS,
     // it is at most AdcMax^2*Q32. For calibrated RMS, valid zero_code_q16 lies
     // in [0,AdcMax*65536], so each sample's offset magnitude is <=AdcMax; the
     // rational and signed correction truncations add less than 2 Q32 units.
@@ -49,7 +51,7 @@ std::int64_t rounded_signed(std::int64_t numerator, std::uint64_t denominator) n
 {
     // All internal signed operands are strictly greater than INT64_MIN.
     const auto magnitude = static_cast<std::uint64_t>(numerator < 0 ? -numerator : numerator);
-    const auto result = static_cast<std::int64_t>((magnitude + denominator / 2U) / denominator);
+    const auto result = static_cast<std::int64_t>(detail::divide_u64(magnitude + denominator / 2U, denominator).quotient);
     return numerator < 0 ? -result : result;
 }
 
@@ -72,8 +74,6 @@ bool valid_begin(std::uint16_t count, const FrameMetadata& metadata,
         metadata.timing.timer_hz >= 1000000U && metadata.timing.timer_hz <= 72000000U &&
         metadata.timing.divider != 0U &&
         (std::uint64_t{metadata.timing.prescaler} + 1U) * (std::uint64_t{metadata.timing.period} + 1U) == metadata.timing.divider &&
-        (metadata.processing.kind == SampleProcessingKind::Filtered25 ||
-         (metadata.processing.kind == SampleProcessingKind::Point && !metadata.processing.source_clipped && !metadata.processing.output_clamped)) &&
         (calibration.kind == CalibrationKind::Unavailable || calibration_valid(calibration)) &&
         config.minimum_peak_to_peak_codes != 0U && config.minimum_peak_to_peak_codes <= AdcMax &&
         config.minimum_hysteresis_codes != 0U && config.minimum_hysteresis_codes <= AdcMax / 2U &&
@@ -99,8 +99,6 @@ bool MeasurementEngine::begin(const std::uint16_t* samples, std::uint16_t count,
     result_.calibration_kind = calibration.kind;
     result_.voltage_available = calibration.kind != CalibrationKind::Unavailable;
     result_.input_ac_coupled = metadata.physical.coupling == InputCoupling::Ac;
-    result_.source_clipped = metadata.processing.source_clipped;
-    result_.filter_clamped = metadata.processing.output_clamped;
     next_ = 0U; sum_ = 0U; sum_squares_ = 0U;
     have_previous_ = false; below_ = false; candidate_ = false; have_crossing_ = false;
     state_ = MeasurementState::Statistics;
@@ -117,25 +115,22 @@ void MeasurementEngine::finish_statistics() noexcept
 {
     const auto n = std::uint64_t{result_.count};
     result_.peak_to_peak_codes = static_cast<std::uint16_t>(result_.maximum_code - result_.minimum_code);
-    result_.mean_code_q16 = static_cast<std::uint32_t>((std::uint64_t{sum_} * 65536U + n / 2U) / n);
+    result_.mean_code_q16 = static_cast<std::uint32_t>(detail::divide_u64(std::uint64_t{sum_} * 65536U + n / 2U, n).quotient);
     result_.rms_code_q16 = square_root_code_q32(rational_q32(sum_squares_, n));
-    const auto variance = n * sum_squares_ - std::uint64_t{sum_} * sum_;
-    result_.ac_rms_code_q16 = square_root_code_q32(rational_q32(variance, n * n));
-    result_.adc_clipped = result_.rail_low_samples != 0U || result_.rail_high_samples != 0U ||
-        result_.source_clipped || result_.filter_clamped;
+    result_.adc_clipped = result_.rail_low_samples != 0U || result_.rail_high_samples != 0U;
     result_.amplitude_valid = result_.voltage_available && !result_.adc_clipped;
     if (result_.voltage_available) {
-        static_cast<void>(code_to_microvolts(result_.minimum_code, calibration_, result_.minimum_microvolts));
-        static_cast<void>(code_to_microvolts(result_.maximum_code, calibration_, result_.maximum_microvolts));
-        result_.peak_to_peak_microvolts = static_cast<std::uint64_t>(result_.maximum_microvolts - result_.minimum_microvolts);
-        const auto low = magnitude(result_.minimum_microvolts);
-        const auto high = magnitude(result_.maximum_microvolts);
+        std::int64_t minimum_microvolts{}, maximum_microvolts{};
+        static_cast<void>(code_to_microvolts(result_.minimum_code, calibration_, minimum_microvolts));
+        static_cast<void>(code_to_microvolts(result_.maximum_code, calibration_, maximum_microvolts));
+        result_.peak_to_peak_microvolts = static_cast<std::uint64_t>(maximum_microvolts - minimum_microvolts);
+        const auto low = magnitude(minimum_microvolts);
+        const auto high = magnitude(maximum_microvolts);
         result_.peak_microvolts = low > high ? low : high;
         const auto mean_delta = rounded_signed(std::int64_t{sum_} * 65536 -
             std::int64_t{result_.count} * calibration_.zero_code_q16, n);
         result_.mean_microvolts = detail::round_gain_product(
             mean_delta * calibration_.microvolts_per_code_q16, calibration_.gain_shift);
-        result_.ac_rms_microvolts = scaled_rms(result_.ac_rms_code_q16, calibration_);
 
         // Center about integer zero first; fractional correction then fits64bits.
         const auto integer_zero = calibration_.zero_code_q16 / 65536;
@@ -146,7 +141,7 @@ void MeasurementEngine::finish_statistics() noexcept
         // Valid captures/calibration bound |numerator| below 2^55; n is 1..1024.
         const auto correction_numerator = 2 * fraction * centered_sum * 65536;
         const auto correction_magnitude = magnitude(correction_numerator);
-        const auto correction_quotient = static_cast<std::int64_t>(correction_magnitude / n);
+        const auto correction_quotient = static_cast<std::int64_t>(detail::divide_u64(correction_magnitude, n).quotient);
         const auto correction = correction_numerator < 0 ? -correction_quotient : correction_quotient;
         const auto mean_square = static_cast<std::int64_t>(rational_q32(centered_squares, n)) - correction + fraction * fraction;
         result_.rms_microvolts = scaled_rms(square_root_code_q32(static_cast<std::uint64_t>(mean_square < 0 ? 0 : mean_square)), calibration_);

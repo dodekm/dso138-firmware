@@ -17,7 +17,7 @@ The `.ioc` file is maintained as the hardware design reference, not the ordinary
 
 A successful compile does not establish suitability for every DSO138 or calibrate its analog front end. Confirm the board/display and UID configuration. Before programming, use STM32CubeProgrammer over SWD to save a full 64 KiB Flash backup and note the option-byte settings. See [Getting started](getting-started.md#4-build-back-up-and-program).
 
-Program the ELF with CubeProgrammer and compare by readback. Avoid routine full-chip erase; the final 2 KiB contains the persistent journal. Each MCU requires its own source configuration and build. The public UID-unconfigured source has not been newly flashed as a public image on hardware.
+Program the ELF with CubeProgrammer and compare by readback. Avoid routine full-chip erase; when storage is enabled, the final 1 KiB page (`0x0800FC00–0x0800FFFF`) contains settings and calibration. Each MCU requires its own source configuration and build. The public UID-unconfigured source has not been newly flashed as a public image on hardware. USB remains disabled in the ordinary profile. An explicitly selected `DSO_USB_STOCK_BENCH_TRIAL` build opts into the factory-standard pull-up bench experiment described in [USB hardware and driver contract](usb-hardware.md); it is not a production-qualified wiring configuration.
 
 ## Publication checks
 
@@ -27,18 +27,22 @@ Historical pre-removal software checks passed 46 LED/GPIO/Capture cases, a rolli
 
 ## Size optimization and future headroom
 
-The unreleased revision with basic FFT, peak-bin reporting and the slow backend removed has a configured optimized-build load span of 59,440 bytes within a 63,488-byte application region, leaving 4,048 bytes. The final 2,048 bytes are reserved for storage. RAM comprises 112 bytes of initialized data, 14,468 bytes of BSS and 2,052 bytes of stack reservation/alignment, leaving 3,848 bytes of the 20 KiB SRAM unallocated. These are configured-build software measurements, not hardware qualification. Persistent payload staging uses 2,016 bytes of owned RAM; no heap allocation was introduced.
+Historical measurement (before the 1 KiB storage profile and USB backend work): the configured optimized build occupied 59,440 bytes within a 63,488-byte application region, leaving 4,048 bytes. That layout reserved the final 2,048 bytes for storage. RAM comprised 112 bytes of initialized data, 14,468 bytes of BSS and 2,052 bytes of stack reservation/alignment. These measurements do not describe the current layout or qualify hardware. Current trial-build measurements are listed below.
 
-Fresh STM32CubeIDE headless imports build both Release and Debug successfully and discover all 39 current C++ sources, including the new FFT/spectrum modules and excluding the deleted rolling/filter modules. The existing non-LTO Capture override is retained. A static callback-expanded stack audit bounds foreground plus conservative interrupt nesting at 1,544 bytes against the 2,048-byte minimum stack, leaving 504 bytes; the four alignment bytes are not counted as usable stack. The spectrum extension has not been flashed or timed on hardware. See [Spectrum engineering](spectrum-design.md) for verification scope.
+Historical pre-USB verification: STM32CubeIDE headless imports built Release and Debug successfully and discovered the then-current 39 C++ sources, including FFT/spectrum and excluding rolling/filter modules. The existing non-LTO Capture override was retained. That image's callback-expanded stack audit bounded foreground plus conservative interrupt nesting at 1,544 bytes against the 2,048-byte minimum stack, leaving 504 bytes; the four alignment bytes were not counted as usable stack. These build and stack results do not cover the USB extension. See [Spectrum engineering](spectrum-design.md) for verification scope.
 
 Both configurations retain `-Os`, LTO with one partition, section garbage collection and the existing non-LTO Capture translation unit. They now enable `-fipa-pta` for more precise interprocedural pointer analysis; startup and terminal application fault handlers have cold-path hints. No ABI or floating-point semantics were changed.
 
 Controlled comparisons found no saving from `-Oz`, while `-O2` and the tested global no-inline settings were larger. On the same pending-event implementation before the cold-path hints, `-fipa-pta` reduced the load image from 61,520 to 61,304 bytes. The hints then reduced it to 61,280 bytes. A lossless packed-font prototype saved table bytes but increased total code size and was discarded. These are build-size observations, not speed measurements.
 
-The 1.0.1 figures above are historical. The unreleased revision intentionally reduces persistent storage to one 2 KiB bank and expands application Flash to 62 KiB. Saving no longer preserves an earlier committed bank through power loss. Payload staging consumes additional bounded SRAM; the 2 KiB stack reservation is retained. See the changelog and Flash optimization report for current measurements.
+The 1.0.1 figures above are historical. The current storage profile uses one 1 KiB page at `0x0800FC00–0x0800FFFF`, leaving a 63 KiB application region. It stores settings and calibration only, does not migrate old data, and retains CRC validation. The page is not automatically erased; an interrupted explicit save can lose the prior stored data.
+
+### Current USB stock-bench software measurement
+
+The current R5 opt-in stock-board trial image occupies 64,456 bytes of its 64,512-byte application region, leaving 56 bytes. Its SRAM accounting is 112 bytes of `.data`, 13,192 bytes of `.bss`, and a 2,048-byte stack reservation, leaving 5,128 bytes unallocated; heap use is zero. Windows CDC enumeration and three automatic restart checks passed on the reference board. The R4 host tests covered held-frame transfers, host-requested Single captures, cancellation and timeout. These results do not establish electrical compliance, gap-free acquisition, or behavior on other board identities/toolchains. Source-default VID/PID are zero, and private test identifiers are not release values; further hardware results are in [USB test status](usb-hardware.md).
 
 GNU make may report missing LTO `.su`/`.cyclo` sidecar targets; a linker warning about an executable writable SRAM load segment reflects the retained Flash-programming kernel. The application compiler treats source warnings as errors. For command-line builds, use the headless builder's `-no-indexer` option to avoid unrelated CDT indexer diagnostics.
 
 The PDF manual illustrates the reference firmware interface. Use this repository's getting-started guide for the public source's per-board configuration and programming procedure.
 
-The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.
+The current one-page format can lose previously saved settings or calibration if reset or power fails during an explicit save. The old layout is not migrated.

@@ -25,7 +25,6 @@ enum class SpectrumState : std::uint8_t {
 
 struct SpectrumResult final {
     bool available{};
-    bool filtered_input{};
     bool peak_available{};
     std::uint16_t peak_bin{};
     std::int16_t peak_dbfs_x100{-32768};
@@ -85,7 +84,6 @@ private:
     std::uint32_t timer_hz_{};
     std::uint32_t divider_{};
     std::int32_t mean_q16_{};
-    bool filtered_input_{};
     bool have_last_point_{};
 };
 

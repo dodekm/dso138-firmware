@@ -52,6 +52,8 @@ uint32_t dso_app_prepare_core(void);
 int dso_app_dma_irq(void);
 /* TIM1-driven LCD bus channels2/3/5; dormant until explicit board activation. */
 void dso_app_lcd_dma_irq(void);
+/* USB LP handler only masks its own IRQ; foreground owns class/protocol work. */
+void dso_app_usb_irq(void);
 
 #ifdef __cplusplus
 }

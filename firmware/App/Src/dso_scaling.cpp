@@ -1,4 +1,5 @@
 #include "dso_scaling.hpp"
+#include "dso_u64_division.hpp"
 #include "dso_timebase_presets.hpp"
 #include "dso_voltage_math.hpp"
 #include "dso_fixed_ratio.hpp"
@@ -55,8 +56,9 @@ bool settings_valid(const FrameMetadata& metadata, const ProjectionSettings& vie
 std::int64_t rounded_signed(std::int64_t numerator, std::uint64_t denominator) noexcept
 {
     const auto magnitude = static_cast<std::uint64_t>(numerator < 0 ? -numerator : numerator);
-    const auto q = magnitude / denominator;
-    const auto r = magnitude % denominator;
+    const auto divided = detail::divide_u64(magnitude, denominator);
+    const auto q = divided.quotient;
+    const auto r = divided.remainder;
     const auto rounded = static_cast<std::int64_t>(q + (r >= (denominator + 1U)/2U ? 1U : 0U));
     return numerator < 0 ? -rounded : rounded;
 }
@@ -206,8 +208,9 @@ std::int32_t WaveformProjector::segment_y(std::int64_t column) const noexcept
     // largest accepted divider/viewport ratio is below 2^34. Their product
     // is below 2^60, so the exact signed interpolation numerator fits uint64.
     const auto product = static_cast<std::uint64_t>(dy < 0 ? -dy : dy) * delta_x;
-    auto whole = product / width;
-    const auto remainder = product % width;
+    const auto divided = detail::divide_u64(product, width);
+    auto whole = divided.quotient;
+    const auto remainder = divided.remainder;
     if (remainder >= (width+1U)/2U) { whole++; }
     return static_cast<std::int32_t>(previous_y_ + (dy < 0 ? -static_cast<std::int64_t>(whole) :
                                   static_cast<std::int64_t>(whole)));

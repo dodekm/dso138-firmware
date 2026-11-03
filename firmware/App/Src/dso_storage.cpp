@@ -52,8 +52,7 @@ bool SnapshotStorage::begin_save(StorageSource source, std::uint16_t bytes) noex
     if (busy(state_)) { return false; }
     if (!port_valid(true)) { error_ = StorageError::InvalidPort; return false; }
     if (!mounted_) { error_ = StorageError::NotMounted; return false; }
-    if (unsupported_ != 0U) { error_ = StorageError::UnsupportedFormat; return false; }
-    if (source.read == nullptr || bytes == 0U || bytes > StoragePayloadMaximum) { error_ = StorageError::InvalidRequest; return false; }
+    if (source.read == nullptr || bytes == 0U || bytes > StoragePayloadWriteMaximum) { error_ = StorageError::InvalidRequest; return false; }
     const auto latest = record_.valid ? record_.generation : 0U;
     if (latest == UINT32_MAX) { error_ = StorageError::GenerationExhausted; return false; }
     generation_ = latest + 1U;
@@ -65,11 +64,6 @@ bool SnapshotStorage::begin_save(StorageSource source, std::uint16_t bytes) noex
 const StorageRecord* SnapshotStorage::candidate(std::uint8_t bank) const noexcept
 { return mounted_ && bank == 0U && record_.valid ? &record_ : nullptr; }
 const StorageRecord* SnapshotStorage::selected() const noexcept { return candidate(0U); }
-bool SnapshotStorage::select(const StorageRecord& record) noexcept
-{
-    if (!mounted_ || busy(state_) || record.bank >= StorageBankCount || !same(record, record_)) { return false; }
-    return true;
-}
 bool SnapshotStorage::read(const StorageRecord& record, std::uint16_t offset, std::uint8_t* output, std::uint16_t bytes) const noexcept
 {
     if (!mounted_ || record.bank >= StorageBankCount || !same(record, record_) || offset > record.bytes ||
@@ -118,7 +112,7 @@ void SnapshotStorage::inspect_header() noexcept
     for (unsigned i{24U}; i < 30U; ++i) { if (header_[i] != 0xffU) { padding = false; } }
     const auto length = u32(header_.data() + 12U);
     const auto generation = u32(header_.data() + 8U);
-    if (!committed || !padding || generation == 0U || length == 0U || length > StoragePayloadMaximum ||
+    if (!committed || !padding || generation == 0U || length == 0U || length > StoragePayloadReadMaximum ||
         u32(header_.data() + 20U) != crc_bytes(header_.data(), 20U)) {
         next_scan_bank(false); return;
     }
@@ -171,7 +165,7 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
                 else if (phase_ == Phase::VerifyPayload) { phase_ = Phase::Commit; }
                 else {
                     record_.valid = true; mounted_ = true;
-                    damaged_ = 0U;
+                    damaged_ = 0U; unsupported_ = 0U;
                     state_ = StorageState::Complete; result_ = StorageResult::Saved; error_ = StorageError::None;
                 }
             }
@@ -238,9 +232,12 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
     progress.state = state_; return progress;
 }
 
-static_assert(sizeof(SnapshotStorage) <= 2200U, "Keep the staged storage workspace within the SRAM budget");
+static_assert(sizeof(SnapshotStorage) <= 384U, "Keep the journal's fixed SRAM workspace bounded");
 static_assert(StorageBankBytes == std::uint32_t{StoragePageBytes} * StoragePagesPerBank &&
-              StorageRegionBytes == std::uint32_t{StorageBankCount} * StorageBankBytes, "Storage partition geometry");
-static_assert(StorageHeaderBytes == 32U && StoragePayloadMaximum + StorageHeaderBytes == StorageBankBytes &&
-              StorageBankBytes % 2U == 0U, "Versioned halfword storage layout");
+              StorageRegionBytes == std::uint32_t{StorageBankCount} * StorageBankBytes &&
+              StorageBankCount == 1U && StoragePagesPerBank == 1U, "Storage must occupy one physical flash page");
+static_assert(StorageHeaderBytes == 32U && StoragePayloadMaximum == 240U &&
+              StoragePayloadMaximum + StorageHeaderBytes <= StorageBankBytes &&
+              StoragePayloadReadMaximum == StoragePayloadWriteMaximum && StorageBankBytes % 2U == 0U,
+              "Bounded versioned halfword storage layout");
 } // namespace dso

@@ -54,6 +54,7 @@ void ScopeUi::redraw() noexcept { redraw_pending_ = true; }
 
 void ScopeUi::invalidate(bool cancel) noexcept
 {
+    host_single_ = false;
     cancel_pending_ = cancel_pending_ || cancel;
     arm_pending_ = false;
     frame_available_ = false;
@@ -69,6 +70,27 @@ void ScopeUi::request_arm() noexcept
     frame_available_ = false;
     state_ = UiRunState::ArmPending;
     redraw();
+}
+
+std::uint32_t ScopeUi::request_host_single() noexcept
+{
+    if (host_single_ || wants_run_ || state_ != UiRunState::Hold || !physical_ready_ || capture_inhibited() ||
+        has_pending_operation()) { return 0U; }
+    host_single_ = true;
+    wants_run_ = true;
+    request_arm();
+    return request_id_;
+}
+
+bool ScopeUi::cancel_host_single(std::uint32_t request_id) noexcept
+{
+    if (!host_single_ || request_id == 0U || request_id != request_id_) { return false; }
+    host_single_ = false;
+    invalidate(true);
+    wants_run_ = false;
+    state_ = UiRunState::Hold;
+    redraw();
+    return true;
 }
 
 void ScopeUi::reconcile() noexcept
@@ -92,6 +114,7 @@ void ScopeUi::physical_update(const PanelUpdate& update) noexcept
     physical_ready_ = ready;
     physical_ = ready ? update.settings : PhysicalSettings{0U, 0U, InputCoupling::Unknown};
     if (!changed) { return; }
+    host_single_ = false;
     calibration_pending_ = {};
     if (state_ == UiRunState::Acquiring || state_ == UiRunState::ArmPending) {
         invalidate(true);
@@ -180,7 +203,7 @@ void ScopeUi::adjust(int direction) noexcept
         return;
     }
     case UiFocus::Storage: {
-        const auto next = static_cast<StorageAction>(bounded(static_cast<int>(storage_action_), direction, 0, 5));
+        const auto next = static_cast<StorageAction>(bounded(static_cast<int>(storage_action_), direction, 0, 3));
         if (next != storage_action_) { storage_action_ = next; redraw(); }
         return;
     }
@@ -261,8 +284,6 @@ void ScopeUi::press(std::uint8_t key) noexcept
                 // One foreground command slot: a later menu change cannot
                 // replace an operation already requested but not consumed.
                 switch (storage_action_) {
-                case StorageAction::SaveWaveform: storage_pending_ = StorageCommand::SaveWaveform; break;
-                case StorageAction::RecallWaveform: storage_pending_ = StorageCommand::RecallWaveform; break;
                 case StorageAction::SaveSettings: storage_pending_ = StorageCommand::SaveSettings; break;
                 case StorageAction::RestoreSettings: storage_pending_ = StorageCommand::RestoreSettings; break;
                 case StorageAction::SaveCalibration: storage_pending_ = StorageCommand::SaveCalibration; break;
@@ -315,6 +336,12 @@ void ScopeUi::buttons(const ButtonEvents& event, std::uint32_t now_ms) noexcept
         return;
     }
     if (suppress_until_release_) { return; }
+    // Any actionable local key takes precedence over a remote one-shot.
+    if (host_single_ && (pressed != 0U || (held != 0U && repeat_key_ != 0U))) {
+        invalidate(true);
+        wants_run_ = false;
+        state_ = UiRunState::Hold;
+    }
     if (pressed != 0U) {
         if (pressed != held) { suppress_until_release_ = true; repeat_key_ = 0U; return; }
         press(pressed);
@@ -366,7 +393,7 @@ bool ScopeUi::on_frame_ready(std::uint32_t request) noexcept
     if (!matching(request) || state_ != UiRunState::Acquiring) { return false; }
     frame_available_ = true;
     arm_pending_ = false;
-    if (settings_.mode == TriggerMode::Single) { wants_run_ = false; }
+    if (settings_.mode == TriggerMode::Single || host_single_) { wants_run_ = false; }
     state_ = UiRunState::FrameReady;
     redraw();
     return true;
@@ -376,6 +403,7 @@ bool ScopeUi::on_frame_consumed(std::uint32_t request) noexcept
 {
     if (!matching(request) || !frame_available_) { return false; }
     frame_available_ = false;
+    host_single_ = false;
     state_ = UiRunState::Hold;
     reconcile();
     redraw();
@@ -387,6 +415,7 @@ bool ScopeUi::on_capture_fault(std::uint32_t request) noexcept
     if (!matching(request) || (state_ != UiRunState::ArmPending &&
                                state_ != UiRunState::Acquiring)) { return false; }
     invalidate(true);
+    host_single_ = false;
     wants_run_ = false;
     state_ = UiRunState::Fault;
     redraw();

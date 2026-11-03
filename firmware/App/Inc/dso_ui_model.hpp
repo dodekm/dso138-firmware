@@ -16,8 +16,8 @@ enum class UiFocus : std::uint8_t {
 
 enum class MeasurementView : std::uint8_t { Overview, Amplitude, Rms, Frequency };
 enum class Domain : std::uint8_t { Scope, Spectrum };
-enum class StorageAction : std::uint8_t { SaveWaveform, RecallWaveform, SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
-enum class StorageCommand : std::uint8_t { None, SaveWaveform, RecallWaveform, SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
+enum class StorageAction : std::uint8_t { SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
+enum class StorageCommand : std::uint8_t { None, SaveSettings, RestoreSettings, SaveCalibration, RestoreCalibration };
 enum class CalibrationAction : std::uint8_t { Begin, AcceptReference, Install, Abort };
 enum class CalibrationCommand : std::uint8_t { None, Begin, AcceptReference, Install, Abort };
 // Values are frozen by the accepted OK gesture, not read later from editors.
@@ -92,6 +92,10 @@ public:
     void buttons(const ButtonEvents& event, std::uint32_t now_ms) noexcept;
 
     [[nodiscard]] UiActions take_actions() noexcept;
+    // Explicit foreground one-shot request used by remote clients. It preserves
+    // the user's selected trigger mode and never synthesizes a panel gesture.
+    [[nodiscard]] std::uint32_t request_host_single() noexcept;
+    [[nodiscard]] bool cancel_host_single(std::uint32_t request_id) noexcept;
     [[nodiscard]] bool on_capture_started(std::uint32_t request_id) noexcept;
     [[nodiscard]] bool on_frame_ready(std::uint32_t request_id) noexcept;
     [[nodiscard]] bool on_frame_consumed(std::uint32_t request_id) noexcept;
@@ -128,6 +132,10 @@ public:
     [[nodiscard]] bool capture_inhibited() const noexcept { return inhibited_ || !valid_catalogue_; }
     [[nodiscard]] bool frame_available() const noexcept { return frame_available_; }
     [[nodiscard]] std::uint32_t request_id() const noexcept { return request_id_; }
+    [[nodiscard]] bool has_pending_operation() const noexcept {
+        return cancel_pending_ || arm_pending_ || storage_pending_ != StorageCommand::None ||
+            calibration_pending_.command != CalibrationCommand::None;
+    }
 
 private:
     void redraw() noexcept;
@@ -148,7 +156,7 @@ private:
     UiFocus focus_{UiFocus::Timebase};
     // Session-only FFT view state; saved scope settings and records stay unchanged.
     Domain domain_{Domain::Scope};
-    StorageAction storage_action_{StorageAction::SaveWaveform};
+    StorageAction storage_action_{StorageAction::SaveSettings};
     StorageCommand storage_pending_{StorageCommand::None};
     CalibrationAction calibration_action_{CalibrationAction::Begin};
     CalibrationRequest calibration_pending_{};
@@ -172,6 +180,7 @@ private:
     std::uint32_t last_repeat_{0U};
     std::uint32_t last_button_time_{0U};
     bool observed_button_time_{false};
+    bool host_single_{false};
 };
 
 } // namespace dso

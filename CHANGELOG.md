@@ -1,27 +1,26 @@
 # Changelog
 
-## Unreleased — Basic FFT, Flash headroom and single-bank storage
+## Unreleased — Basic FFT and compact settings/calibration storage
 
 - Add an independently developed fixed-point real FFT and a fixed 512-point, mean-removed, periodic-Hann spectrum view. It uses the frozen record's actual timer rate, ADC peak-referenced dBFS, a fixed +10 to -70 dBFS plot and a strongest positive-frequency-bin readout without interpolation.
 - Recover 176 more bytes with bounded 32-bit UI integer formatting, checked byte-offset label tables and a shared LCD fallback command loop. Existing scope, FFT and calibration behavior is retained.
 - Share exact scaled-ratio arithmetic between waveform projection and frequency measurement, recovering 96 bytes of Flash with unchanged numerical results. The normal projection path remains inline.
-- Add a session-only Domain selector while preserving the scope controls and raw waveform/settings storage format. Scope and Spectrum share focus/action formatting; Save, Recall and Calibration remain visible in either domain.
+- Add a session-only Domain selector while preserving the scope controls. Scope and Spectrum share focus/action formatting; settings and calibration storage actions remain available in either domain.
 - Reuse the stopped DMA workspace through explicit C++ object-lifetime transitions. No second transform buffer, dynamic allocation, runtime trigonometry, floating-point dependency or imported FFT implementation is added.
-- Update the LaTeX/PDF manual to revision 1.3. The configured software image occupies 59,440 bytes, leaving 4,048 bytes free. New FFT hardware timing and deployment remain unverified.
+- Update the LaTeX/PDF manual to revision 1.8 with R5 USB restart checks and current stock-trial resource figures. Revision 1.7 recorded host-requested capture results; revision 1.6 added experimental USB host instructions; revision 1.5 clarified the implemented absolute peak, peak-to-peak, total RMS, mean and frequency displays. The 59,440-byte image measurement below is historical and does not describe the current storage layout. FFT hardware timing remains unverified.
 
-- Reserve 2 KiB instead of 4 KiB for saved records, increasing the application region to 62 KiB.
-- Remove the six 10–500 s/div timebases and their slow rolling, oversampling, and FIR-filtered acquisition backend. The active catalogue now spans 10 µs/div through 5 s/div. Saved records with removed timebase indices are rejected rather than mapped onto a different setting; users can explicitly save a supported replacement.
-- Replace copy-on-write saving with a single bank. Power loss during erase/programming can lose the previous saved waveform, settings and calibration; checksums and commit validation still reject incomplete records.
-- Stage the complete payload in bounded RAM before erasing, preserving existing waveform data when saving only settings or calibration.
-- Simplify storage to one record with no mutable bank address/selector, and avoid clearing staged bytes that are completely overwritten before use.
-- Remove remaining multi-candidate bookkeeping from semantic storage opening while retaining final-header validation and malformed/unknown-format handling.
+- Reserve one 1 KiB Flash page (`0x0800FC00–0x0800FFFF`), increasing the application region to 63 KiB.
+- Remove the six 10–500 s/div timebases and their slow rolling, oversampling, and FIR-filtered acquisition backend. The active catalogue now spans 10 µs/div through 5 s/div.
+- Remove waveform save/recall and legacy-record migration. Persist current settings and nine-slot DC calibration only. CRC validation remains enabled. The page is not erased automatically at boot; power loss during explicit Save Config or Save Cal can lose the prior stored data.
+- The current page uses at most 272 bytes (32-byte envelope, 36-byte settings record, 204-byte calibration record), leaving 752 bytes spare.
+- Keep CRC validation for the compact settings/calibration records. No boot-time erase is performed; an interrupted explicit save can lose the prior stored record.
 - Historical pre-removal implementation experiments tracked slow-filter clipping with a fixed-width shift register and paired symmetric FIR samples. The slow rolling/filter path has since been removed.
 - Use a bounded exact Q32 square root for validated ADC moments, including fractional calibration offsets, with 32-bit root/remainder arithmetic.
 - Narrow the bounded fractional frequency quotient to 32 bits while preserving the original fast path, precision and rounding.
 - Specialize exact waveform-position multiplication for its bounded width and simplify adjacent-sample interpolation using proven 64-bit product bounds, retaining rounding and viewport behavior.
 - Store bounded private vertical projection coordinates in 32 bits, reducing Flash, RAM and stack use while retaining 64-bit horizontal geometry and interpolation products.
 - Share LCD coordinate encoding, compact UI label selection and remove redundant scratch clearing.
-- The old lower storage bank becomes application space; existing saved records are not guaranteed to migrate. No new hardware deployment is claimed.
+- The previous storage layout is not migrated and old data is not preserved. Public USB remains disabled, electrically unqualified and unflashed; the fully enabled image size is pending, with no fit claim.
 
 ## 1.0.1 — Trigger LED indication
 

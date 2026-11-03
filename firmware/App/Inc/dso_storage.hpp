@@ -6,18 +6,26 @@
 
 namespace dso {
 inline constexpr std::uint16_t StoragePageBytes{1024U};
-inline constexpr std::uint8_t StoragePagesPerBank{2U};
+inline constexpr std::uint8_t StoragePagesPerBank{1U};
 inline constexpr std::uint8_t StorageBankCount{1U};
 static_assert(StorageBankCount == 1U, "SnapshotStorage scalar state requires exactly one bank");
-inline constexpr std::uint16_t StorageBankBytes{2048U};
+static_assert(StoragePagesPerBank == 1U, "The journal reserves one physical flash page");
+inline constexpr std::uint16_t StorageBankBytes{1024U};
 inline constexpr std::uint16_t StorageRegionBytes{StorageBankCount * StorageBankBytes};
 inline constexpr std::uint16_t StorageHeaderBytes{32U};
-inline constexpr std::uint16_t StoragePayloadMaximum{StorageBankBytes - StorageHeaderBytes};
+inline constexpr std::uint16_t StoragePayloadMaximum{240U};
+static_assert(StorageBankBytes == StoragePagesPerBank * StoragePageBytes,
+              "Journal bank geometry must match its physical page count");
+static_assert(StorageHeaderBytes + StoragePayloadMaximum <= StorageBankBytes,
+              "Journal header and maximum payload must fit in one bank");
+inline constexpr std::uint16_t StoragePayloadReadMaximum{StoragePayloadMaximum};
+inline constexpr std::uint16_t StoragePayloadWriteMaximum{StoragePayloadMaximum};
 inline constexpr std::uint32_t StorageMagic{0x53534f44U}; // Little-endian "DOSS".
-inline constexpr std::uint16_t StorageSchema{1U};
+inline constexpr std::uint16_t StorageSchema{2U};
 inline constexpr std::uint16_t StorageCommit{0xa55aU};
 
-// Relative byte addresses in one explicitly reserved bank. Every
+// Relative byte addresses in one explicitly reserved flash page. Scans and
+// writes are bounded to the settings/calibration payload. Every
 // callback is foreground-only, bounded and nonthrowing. Only erased halfwords
 // may be programmed, once, until another page erase. A false write/erase result
 // may have changed ANY target bits; callers must rescan instead of resuming it.
@@ -71,7 +79,6 @@ public:
     // stop when the bank is invalidated for erase. False reads may modify output.
     [[nodiscard]] const StorageRecord* candidate(std::uint8_t bank) const noexcept;
     [[nodiscard]] const StorageRecord* selected() const noexcept;
-    [[nodiscard]] bool select(const StorageRecord& record) noexcept;
     [[nodiscard]] bool read(const StorageRecord& record, std::uint16_t offset,
                             std::uint8_t* output, std::uint16_t bytes) const noexcept;
     [[nodiscard]] StorageState state() const noexcept { return state_; }
@@ -98,8 +105,8 @@ private:
     StorageRecord record_{};
     // Only bytes_ bytes are consumed; every byte is written during staging
     // before erase or payload programming can begin.
-    std::array<std::uint8_t, StoragePayloadMaximum> staged_payload_;
-    std::array<std::uint8_t, StorageHeaderBytes> header_{};
+    std::array<std::uint8_t, StoragePayloadWriteMaximum> staged_payload_;
+    std::array<std::uint8_t, StorageHeaderBytes> header_;
     std::uint32_t crc_{0xffffffffU};
     std::uint32_t generation_{};
     std::uint16_t offset_{};

@@ -24,9 +24,9 @@ Use the exact values from your MCU. Do not remove or bypass the identity, MCU-ty
 2. Connect SWDIO, SWCLK, GND and target reference voltage. Keep the board on its normal supply; the programmer's 3.3 V output is not analog-board power.
 3. In STM32CubeProgrammer, connect over **SWD**, save a backup of the complete 64 KiB Flash contents, and record option-byte settings before changing anything.
 4. Program `firmware/Release/dso138.elf` through CubeProgrammer and perform a readback comparison.
-5. Preserve the final 2 KiB Flash journal if you want to keep settings or records. Avoid full-chip erase as a default; it erases the journal as well as the application.
+5. Preserve the final 1 KiB Flash page (`0x0800FC00–0x0800FFFF`) if you want to keep saved settings or calibration. Avoid full-chip erase as a default; it erases the page as well as the application.
 6. Disconnect SWD and power the instrument normally. Check startup, display and controls before connecting a signal.
 
 Build separately for each MCU; an image made with your UID is not a universal image. The [user manual (PDF)](manual/dso138-user-manual.pdf) and [editable LaTeX source](manual/dso138-user-manual.tex) cover the controls and operation.
 
-The unreleased single-bank storage format can lose previously saved data if reset or power fails during a save. The old lower bank is application space; previous saved records are not guaranteed to migrate.
+Storage retains settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved data. Public USB remains disabled and unqualified.

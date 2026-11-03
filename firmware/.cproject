@@ -71,6 +71,7 @@
 									<listOptionValue builtIn="false" value="DSO_BOARD_NOMINAL_GAIN=2" />
 									<listOptionValue builtIn="false" value="DSO_BOARD_ZERO_CODE_Q16=133111936" />
 									<listOptionValue builtIn="false" value="DSO_BOARD_STORAGE=1" />
+									<listOptionValue builtIn="false" value="DSO_BOARD_USB=1" />
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.includepaths.dso.Debug" name="Include paths (-I)" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.includepaths" valueType="includePath">
 									<listOptionValue builtIn="false" value="../Inc" />
@@ -234,6 +235,7 @@
 									<listOptionValue builtIn="false" value="DSO_BOARD_NOMINAL_GAIN=2" />
 									<listOptionValue builtIn="false" value="DSO_BOARD_ZERO_CODE_Q16=133111936" />
 									<listOptionValue builtIn="false" value="DSO_BOARD_STORAGE=1" />
+									<listOptionValue builtIn="false" value="DSO_BOARD_USB=1" />
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.includepaths.dso.Release" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.includepaths" valueType="includePath">
 									<listOptionValue builtIn="false" value="../Inc" />

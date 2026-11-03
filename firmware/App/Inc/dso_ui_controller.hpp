@@ -41,7 +41,7 @@ struct UiControllerConfig final {
     InputPauseGate acquisition_input{}; // Synchronous planning/arm: quiesce ADC2.
     bool startup_run{}; // One initial intent; qualification gates still apply.
 };
-enum class UiStorageStatus : std::uint8_t { Disabled, Idle, Busy, Saved, Recalled, Restored, Empty, Error, ReadOnly, HoldRequired };
+enum class UiStorageStatus : std::uint8_t { Disabled, Idle, Busy, Saved, Restored, Empty, Error, ReadOnly, HoldRequired };
 enum class UiCalibrationStatus : std::uint8_t { Disabled, Ready, HoldRequired, ReferenceRequired, Updated, Error };
 enum class UiControllerFault : std::uint8_t { None, Acquisition, Copy, Projection, Display, Configuration, Measurement, Spectrum };
 enum class UiWork : std::uint8_t { Idle, Copying, Measuring, Projecting, Rendering, Spectrum };
@@ -52,6 +52,13 @@ struct UiServiceResult final {
     RenderStep render;
     MeasurementStep measurement;
 };
+
+struct CaptureExportView final {
+    FrameMetadata frame{};
+    VoltageCalibration calibration{};
+    std::uint32_t token{};
+};
+enum class HostCaptureState : std::uint8_t { None, Pending, Complete, Cancelled, Fault };
 
 // One foreground owner orchestrates input -> acquire -> freeze -> bounded copy
 // -> projection -> screen -> release. Auto/Normal rearm only after presentation;
@@ -65,7 +72,7 @@ public:
                     UiControllerConfig config = {}) noexcept;
     // End the renderer's projection borrow. External acquisition/storage
     // owners outlive this object; outstanding storage jobs must finish first.
-    ~ScopeController() noexcept { cancel_consumers(); }
+    ~ScopeController() noexcept { invalidate_export(); cancel_consumers(); }
     ScopeController(const ScopeController&) = delete;
     ScopeController& operator=(const ScopeController&) = delete;
     // Apply every tuple (including invalid tuples) BEFORE service/arm. The
@@ -83,7 +90,6 @@ public:
     [[nodiscard]] const ScreenSnapshot& scene() const noexcept { return screen_.view_; }
     [[nodiscard]] ScopeTimebaseSupport timebase_support() const noexcept { return plan_.support; }
     [[nodiscard]] bool acquisition_running() const noexcept;
-    [[nodiscard]] bool recalled_frame() const noexcept { return frame_valid_ && frame_recalled_; }
     [[nodiscard]] bool storage_busy() const noexcept { return storage_phase_ != StoragePhase::Idle; }
     [[nodiscard]] UiStorageStatus storage_status() const noexcept { return storage_status_; }
     [[nodiscard]] UiCalibrationStatus calibration_status() const noexcept { return calibration_status_; }
@@ -95,11 +101,18 @@ public:
     // record matching the currently accepted switches. Reference is external.
     [[nodiscard]] bool calibration_point(std::int64_t reference_microvolts,
                                          CalibrationPoint& point) const noexcept;
+    // Holds the copied frame immutable until end_export() or an invalidating
+    // local action. Samples are read in bounded chunks; no frame pointer escapes.
+    [[nodiscard]] bool begin_export(CaptureExportView& view) noexcept;
+    [[nodiscard]] bool export_sample(std::uint32_t token, std::uint16_t index,
+                                     std::uint16_t& out) const noexcept;
+    void end_export(std::uint32_t token) noexcept;
+    [[nodiscard]] std::uint32_t request_host_single() noexcept;
+    [[nodiscard]] HostCaptureState host_capture_state(std::uint32_t job) const noexcept;
+    [[nodiscard]] bool cancel_host_capture(std::uint32_t job) noexcept;
 
 private:
-    enum class StoragePhase : std::uint8_t { Idle, Opening, Saving, Reading, Tail, Publishing };
-    static bool held_sample(void*, std::uint16_t, std::uint16_t&) noexcept;
-    static bool stored_sample(void*, std::uint16_t, std::uint16_t&) noexcept;
+    enum class StoragePhase : std::uint8_t { Idle, Opening, Saving, Reading };
     static bool stored_calibration(void*, std::uint16_t, std::uint8_t*, std::uint16_t) noexcept;
     static bool staged_calibration(void*, std::uint16_t, std::uint8_t*, std::uint16_t) noexcept;
     void start_storage(StorageCommand command) noexcept;
@@ -108,6 +121,9 @@ private:
     void finish_storage(UiStorageStatus status) noexcept;
     void refresh_backend() noexcept;
     void cancel_consumers() noexcept;
+    void invalidate_export() noexcept;
+    void cancel_host_job(HostCaptureState state) noexcept;
+    void supersede_host_job() noexcept;
     void publish_fault(UiControllerFault reason) noexcept;
     // Returns false only when this cancellation newly discovers a failed stop.
     [[nodiscard]] bool cancel_acquisition() noexcept;
@@ -132,6 +148,11 @@ private:
     UiWork work_{UiWork::Idle};
     std::uint32_t active_request_{};
     std::uint32_t frame_request_{};
+    std::uint32_t export_token_{};
+    std::uint32_t export_generation_{};
+    std::uint32_t host_job_{};
+    std::uint32_t host_request_{};
+    HostCaptureState host_state_{HostCaptureState::None};
     std::uint32_t revision_{1U};
     // Exact formatter changes accumulate until a renderer accepts the scene.
     // A cancelled physical job independently invalidates the screen's cache.
@@ -148,16 +169,13 @@ private:
     bool frame_valid_{};
     bool spectrum_workspace_leased_{};
     bool pending_consumption_{};
-    bool frame_legacy_rolling_{};
-    std::uint64_t frame_legacy_rolling_revision_{};
     StoragePhase storage_phase_{StoragePhase::Idle};
     StorageCommand storage_command_{StorageCommand::None};
     UiStorageStatus storage_status_{UiStorageStatus::Disabled};
     bool storage_boot_pending_{true};
     bool storage_boot_active_{};
     bool storage_boot_waiting_input_{};
-    bool frame_recalled_{};
-    std::uint32_t recall_crc_{}, recall_expected_crc_{};
+    bool export_active_{};
     CalibrationSession calibration_session_{};
     UiCalibrationStatus calibration_status_{UiCalibrationStatus::Disabled};
 };

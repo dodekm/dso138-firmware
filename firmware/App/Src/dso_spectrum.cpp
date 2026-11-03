@@ -1,4 +1,5 @@
 #include "dso_spectrum.hpp"
+#include "dso_u64_division.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -99,9 +100,7 @@ bool SpectrumAnalyzer::begin(const std::uint16_t* samples, std::uint16_t count,
     if (samples == nullptr || work == nullptr || count == 0U ||
         count > CaptureCapacity ||
         static_cast<std::uint32_t>(start) + SpectrumLength > count ||
-        capacity_words < SpectrumLength || !valid_timing(frame.timing) ||
-        (frame.processing.kind != SampleProcessingKind::Point &&
-         frame.processing.kind != SampleProcessingKind::Filtered25)) {
+        capacity_words < SpectrumLength || !valid_timing(frame.timing)) {
         state_ = SpectrumState::Invalid;
         return false;
     }
@@ -113,13 +112,11 @@ bool SpectrumAnalyzer::begin(const std::uint16_t* samples, std::uint16_t count,
     capacity_words_ = capacity_words;
     timer_hz_ = frame.timing.timer_hz;
     divider_ = frame.timing.divider;
-    filtered_input_ = frame.processing.kind == SampleProcessingKind::Filtered25;
     projection.width = SpectrumPlotWidth;
     projection.height = SpectrumPlotHeight;
     projection.available = false;
     projection.interpolated = false;
     projection.raw_codes = false;
-    result_.filtered_input = filtered_input_;
     state_ = SpectrumState::ClearingProjection;
     return true;
 }
@@ -185,7 +182,7 @@ void SpectrumAnalyzer::reset() noexcept
     packed_real_ = 0;
     timer_hz_ = divider_ = 0U;
     mean_q16_ = 0;
-    filtered_input_ = have_last_point_ = false;
+    have_last_point_ = false;
 }
 
 void SpectrumAnalyzer::mean_one() noexcept
@@ -329,7 +326,7 @@ std::uint64_t SpectrumAnalyzer::frequency_microhertz(std::uint16_t bin) const no
 {
     const auto numerator = static_cast<std::uint64_t>(timer_hz_) * bin * 1000000U;
     const auto denominator = static_cast<std::uint64_t>(divider_) * SpectrumLength;
-    return (numerator + denominator / 2U) / denominator;
+    return detail::divide_u64(numerator + denominator / 2U, denominator).quotient;
 }
 
 std::uint64_t SpectrumAnalyzer::peak_frequency_microhertz() const noexcept
