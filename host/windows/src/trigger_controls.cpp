@@ -63,9 +63,7 @@ TriggerControls::TriggerControls(QWidget *parent) : QWidget(parent)
     connect(level_, &QSpinBox::valueChanged, this, [this] { refreshActions(); });
     connect(position_, &QDoubleSpinBox::valueChanged, this, [this] { refreshActions(); });
     connect(apply_, &QPushButton::clicked, this, [this] {
-        const int edge = edge_->currentIndex(), level = level_->value(), position = positionPermille();
-        showAppliedTrigger();
-        emit triggerRequested(edge, level, position);
+        emit triggerRequested(edge_->currentIndex(), level_->value(), positionPermille());
     });
     refreshActions();
 }
@@ -73,7 +71,11 @@ TriggerControls::TriggerControls(QWidget *parent) : QWidget(parent)
 void TriggerControls::setInstrumentSettings(const protocol::Settings &settings,
                                              protocol::SettingsAvailability availability)
 {
-    const bool changed = availability != availability_ || settings.triggerEdge != applied_.triggerEdge ||
+    const bool hadReadback = availability_ == protocol::SettingsAvailability::Supported ||
+                             availability_ == protocol::SettingsAvailability::Stale;
+    const bool hasReadback = availability == protocol::SettingsAvailability::Supported ||
+                             availability == protocol::SettingsAvailability::Stale;
+    const bool changed = hadReadback != hasReadback || settings.triggerEdge != applied_.triggerEdge ||
                          settings.triggerLevel != applied_.triggerLevel ||
                          settings.triggerPositionPermille != applied_.triggerPositionPermille;
     applied_ = settings;
@@ -85,6 +87,8 @@ void TriggerControls::setInstrumentSettings(const protocol::Settings &settings,
 
 void TriggerControls::setInteractive(bool interactive)
 {
+    if (interactive_ == interactive)
+        return;
     interactive_ = interactive;
     refreshActions();
 }

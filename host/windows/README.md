@@ -23,6 +23,15 @@ even when the instrument changes. Press a physical button to take over
 from the remote settings. Closing the connection or leaving it idle
 restores the prior local settings. Resume local RUN from the panel.
 
+In Studio 2.0.2, the capture list stays fixed while its menu is open.
+New records are added when the menu closes. Selecting an older capture
+freezes it for inspection, measurement and export.
+
+After **Stop live**, **Download held** can wait up to one second for a
+scope in HOLD to finish its foreground work. Studio reports when the
+instrument has no exportable record. Captures already received remain
+available in the PC history.
+
 Scroll over the time plot to zoom or drag to pan. Press **F** to fit and
 **C** to toggle cursors while the plot has focus. Drag A and B along the
 trace or use arrow keys for A and Shift with arrow keys for B. The app

@@ -175,11 +175,6 @@ void Session::setBusy(bool busy)
     emit busyChanged(busy_);
 }
 
-bool Session::settingsReadInProgress() const noexcept
-{
-    return state_ == State::ReadingSettings;
-}
-
 bool Session::cancellable() const noexcept
 {
     return busy_ && state_ != State::ReadingSettings && state_ != State::ReadingLiveSettings &&
@@ -236,7 +231,7 @@ void Session::resetProtocolState()
     extendedMetadataAvailable_ = false;
     recordPublishClock_.invalidate();
     liveSettingsClock_.invalidate();
-    queuedSettingsWrite_.reset();
+    deferredAction_ = {};
     decoder_.clear();
     exchange_ = {};
     jobId_ = 0;
@@ -255,6 +250,7 @@ void Session::resetProtocolState()
     pendingFailure_.clear();
     captureClock_.invalidate();
     completionClock_.invalidate();
+    downloadClock_.invalidate();
 }
 
 void Session::downloadHeld()
@@ -263,6 +259,8 @@ void Session::downloadHeld()
     {
         return;
     }
+    if (deferUntilSettingsRead([this] { downloadHeld(); }))
+        return;
     setBusy(true);
     cancelRequested_ = false;
     pendingFailure_.clear();
@@ -272,6 +270,11 @@ void Session::downloadHeld()
     jobId_ = 0;
     jobCompleteVerified_ = false;
     acquisitionDurationMs_ = -1;
+    // Cancellation may be acknowledged before the device finishes its HOLD
+    // redraw. Give an explicit held download the same readiness bound.
+    if (settingsAvailability_ == protocol::SettingsAvailability::Supported &&
+        instrumentSettings_.uiState == 0 && (instrumentSettings_.flags & 1U) == 0)
+        completionClock_.start();
     requestFrame();
 }
 
@@ -299,6 +302,8 @@ void Session::startLive(int timeoutMs)
         emit message(QStringLiteral("Capture timeout must be from 1 to 600000 ms"));
         return;
     }
+    if (deferUntilSettingsRead([this, timeoutMs] { startLive(timeoutMs); }))
+        return;
     if (settingsAvailability_ != protocol::SettingsAvailability::Supported ||
         (instrumentSettings_.flags & 0x08U) == 0)
     {
@@ -406,20 +411,29 @@ bool Session::canSubmitSettings() const noexcept
            ((state_ == State::Idle && !busy_) || state_ == State::ReadingSettings);
 }
 
+bool Session::deferUntilSettingsRead(std::function<void()> action)
+{
+    if (state_ != State::ReadingSettings)
+        return false;
+    if (deferredAction_)
+    {
+        emit message(QStringLiteral("An action is already waiting for instrument readback"));
+        return true;
+    }
+    deferredAction_ = std::move(action);
+    return true;
+}
+
 void Session::submitSettingsWrite(quint8 opcode, QByteArray values)
 {
     const SettingsWrite write{opcode, instrumentSettings_.revision, std::move(values)};
-    if (state_ == State::ReadingSettings)
-    {
-        if (queuedSettingsWrite_)
-        {
-            emit message(QStringLiteral("Wait for the previous settings change to finish"));
-            return;
-        }
-        queuedSettingsWrite_ = write;
-        return;
-    }
-    startSettingsWrite(write);
+    if (!deferUntilSettingsRead([this, write] {
+            if (canSubmitSettings() && write.revision == instrumentSettings_.revision)
+                startSettingsWrite(write);
+            else
+                emit message(QStringLiteral("Instrument settings changed before the write. Review the applied values."));
+        }))
+        startSettingsWrite(write);
 }
 
 void Session::startSettingsWrite(const SettingsWrite &write)
@@ -441,6 +455,10 @@ void Session::beginCaptureSeries(int count, int timeoutMs, int intervalMs)
         emit message(QStringLiteral("Capture timeout must be from 1 to 600000 ms"));
         return;
     }
+    if (deferUntilSettingsRead([this, count, timeoutMs, intervalMs] {
+            beginCaptureSeries(count, timeoutMs, intervalMs);
+        }))
+        return;
 
     setBusy(true);
     cancelRequested_ = false;
@@ -621,9 +639,10 @@ void Session::handleReply(const protocol::Reply &reply)
     }
     if (reply.status == protocol::Status::Busy && state_ == State::BeginFrame)
     {
-        if (jobId_ != 0 && completionClock_.isValid() &&
+        if (reply.payload.size() == 1 && completionClock_.isValid() &&
             completionClock_.elapsed() < kCaptureReadinessMs && !cancelRequested_)
         {
+            downloadClock_.invalidate();
             scheduleStateTimer(15);
             return;
         }
@@ -632,17 +651,39 @@ void Session::handleReply(const protocol::Reply &reply)
     }
     if (state_ == State::EndFrame && reply.status != protocol::Status::Ok)
     {
-        // The lease may already have been revoked by expiry or a local action.
-        // Treat it as released so cleanup cannot loop on a stale token.
-        exportToken_ = 0;
-        failOperation(QStringLiteral("Device could not release the frame lease"));
+        if (reply.status == protocol::Status::Stale && reply.payload.size() == 1)
+        {
+            // END_FRAME returns Stale when the device no longer owns this
+            // token (for example, after lease expiry or a local action).
+            exportToken_ = 0;
+            failOperation(QStringLiteral("Frame lease expired before it could be released"));
+        }
+        else
+        {
+            closeTransport(QStringLiteral("END_FRAME did not confirm release; connection reset "
+                                          "to clear the uncertain frame lease"),
+                           true);
+        }
         return;
     }
     if (state_ == State::CancelCapture && reply.status != protocol::Status::Ok)
     {
-        jobId_ = 0;
-        completeOperation(pendingFailure_.isEmpty() ? QStringLiteral("Operation cancelled")
-                                                    : pendingFailure_);
+        const bool ownershipEnded =
+            reply.payload.size() == 1 &&
+            (reply.status == protocol::Status::Cancelled ||
+             reply.status == protocol::Status::Stale || reply.status == protocol::Status::Timeout);
+        if (ownershipEnded)
+        {
+            jobId_ = 0;
+            completeOperation(pendingFailure_.isEmpty() ? QStringLiteral("Operation cancelled")
+                                                        : pendingFailure_);
+        }
+        else
+        {
+            closeTransport(QStringLiteral("CANCEL_CAPTURE did not confirm job cleanup; "
+                                          "connection reset to clear the uncertain job"),
+                           true);
+        }
         return;
     }
     if (reply.status != protocol::Status::Ok)
@@ -670,13 +711,17 @@ void Session::handleReply(const protocol::Reply &reply)
     case State::CaptureAcknowledgement:
         if (reply.payload.size() != 5)
         {
-            failOperation(QStringLiteral("CAPTURE_SINGLE response must contain one job ID"));
+            closeTransport(QStringLiteral("Capture acknowledgement is malformed; connection "
+                                          "reset to clear any accepted job"),
+                           true);
             return;
         }
         jobId_ = read32(reply.payload, 1);
         if (jobId_ == 0)
         {
-            failOperation(QStringLiteral("Device returned an invalid zero capture job ID"));
+            closeTransport(QStringLiteral("Capture acknowledgement contains an invalid job ID; "
+                                          "connection reset to clear any accepted job"),
+                           true);
             return;
         }
         if (cancelRequested_)
@@ -737,7 +782,6 @@ void Session::requestSettings()
     }
     settingsTimer_.stop();
     state_ = State::ReadingSettings;
-    setBusy(true);
     sendCommand(8);
 }
 
@@ -753,54 +797,42 @@ void Session::scheduleSettingsPoll()
 
 void Session::handleSettings(const protocol::Reply &reply)
 {
-    const auto queued = std::exchange(queuedSettingsWrite_, std::nullopt);
+    QString messageText;
     if (reply.status == protocol::Status::Unsupported)
     {
         settingsAvailability_ = protocol::SettingsAvailability::Legacy;
-        state_ = State::Idle;
-        setBusy(false);
-        emit instrumentSettingsChanged(instrumentSettings_, settingsAvailability_);
-        emit message(QStringLiteral("Connected to legacy firmware; live settings readback is unavailable"));
-        return;
+        messageText = QStringLiteral("Connected to legacy firmware; live settings readback is unavailable");
     }
-
-    if (reply.status != protocol::Status::Ok)
+    else if (reply.status != protocol::Status::Ok)
     {
         settingsAvailability_ = protocol::SettingsAvailability::Stale;
-        state_ = State::Idle;
-        setBusy(false);
-        emit instrumentSettingsChanged(instrumentSettings_, settingsAvailability_);
-        emit message(QStringLiteral("Instrument settings readback failed with status %1; retrying")
-                         .arg(quint8(reply.status)));
-        scheduleSettingsPoll();
-        return;
+        messageText = QStringLiteral("Instrument settings readback failed with status %1; retrying")
+                          .arg(quint8(reply.status));
     }
-
-    protocol::Settings decoded;
-    QString error;
-    if (!protocol::decodeSettings(reply.payload, decoded, &error))
+    else
     {
-        settingsAvailability_ = protocol::SettingsAvailability::Stale;
-        state_ = State::Idle;
-        setBusy(false);
-        emit instrumentSettingsChanged(instrumentSettings_, settingsAvailability_);
-        emit message(QStringLiteral("Instrument settings response is invalid: %1").arg(error));
-        scheduleSettingsPoll();
-        return;
+        protocol::Settings decoded;
+        QString error;
+        if (protocol::decodeSettings(reply.payload, decoded, &error))
+        {
+            instrumentSettings_ = decoded;
+            settingsAvailability_ = protocol::SettingsAvailability::Supported;
+            extendedMetadataAvailable_ = (decoded.flags & 0x08U) != 0;
+        }
+        else
+        {
+            settingsAvailability_ = protocol::SettingsAvailability::Stale;
+            messageText = QStringLiteral("Instrument settings response is invalid: %1").arg(error);
+        }
     }
-    instrumentSettings_ = decoded;
-    settingsAvailability_ = protocol::SettingsAvailability::Supported;
-    extendedMetadataAvailable_ = (decoded.flags & 0x08U) != 0;
+    auto action = std::exchange(deferredAction_, {});
+    const auto generation = generation_;
     state_ = State::Idle;
-    setBusy(false);
     emit instrumentSettingsChanged(instrumentSettings_, settingsAvailability_);
-    if (queued && queued->revision == decoded.revision && state_ == State::Idle && connected_)
-    {
-        startSettingsWrite(*queued);
-        return;
-    }
-    if (queued)
-        emit message(QStringLiteral("Instrument settings changed before the write. Review the applied values."));
+    if (!messageText.isEmpty())
+        emit message(messageText);
+    if (action && generation == generation_ && state_ == State::Idle && connected_)
+        action();
     scheduleSettingsPoll();
 }
 
@@ -1094,7 +1126,18 @@ void Session::handleBegin(const protocol::Reply &reply)
                              : protocol::decodeMetadata(reply.payload, metadata_, nullptr);
     if (!decoded)
     {
-        failOperation(QStringLiteral("BEGIN_FRAME metadata is invalid"));
+        if (exportToken_ != 0)
+        {
+            // The metadata body is unusable, but its complete fixed-size
+            // prefix supplied a token that can still release the lease.
+            failOperation(QStringLiteral("BEGIN_FRAME metadata is malformed"));
+        }
+        else
+        {
+            closeTransport(QStringLiteral("BEGIN_FRAME metadata is malformed; connection reset "
+                                          "to clear a lease without a usable token"),
+                           true);
+        }
         return;
     }
     if (metadata_.extendedSettingsValid)
@@ -1198,8 +1241,12 @@ void Session::handleEnd(const protocol::Reply &reply)
 {
     if (reply.payload.size() != 1)
     {
-        exportToken_ = 0;
-        failOperation(QStringLiteral("END_FRAME response has an unexpected payload"));
+        // The reply matched the request ID and passed CRC, but its body does
+        // not establish whether the device released the lease. Resetting the
+        // session makes firmware revoke any lease still owned by this host.
+        closeTransport(QStringLiteral("END_FRAME response has an unexpected payload; "
+                                      "connection reset to clear the uncertain frame lease"),
+                       true);
         return;
     }
     exportToken_ = 0;
@@ -1356,6 +1403,7 @@ void Session::completeOperation(const QString &text)
     cancelRequested_ = false;
     jobCompleteVerified_ = false;
     pendingFailure_.clear();
+    deferredAction_ = {};
     liveCapture_ = false;
     trackHostInterval_ = false;
     recordPublishClock_.invalidate();
@@ -1414,9 +1462,12 @@ void Session::onStateTimer()
         startNextCapture();
         return;
     }
-    if (state_ == State::BeginFrame && jobId_ != 0 && !exchange_.pending)
+    if (state_ == State::BeginFrame && completionClock_.isValid() && !exchange_.pending)
     {
-        requestFrame();
+        if (completionClock_.elapsed() >= kCaptureReadinessMs)
+            failOperation(QStringLiteral("No exportable held frame is available"));
+        else
+            requestFrame();
     }
 }
 

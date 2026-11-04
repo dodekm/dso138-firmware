@@ -2,7 +2,7 @@
 
 This guide is for DSO138 owners who want to build and program the firmware.
 
-For PC use, download [DSO138 Studio for Windows x64](https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0) and follow the [Studio quick start](../host/windows/README.md#quick-start). A USB-enabled companion firmware build is required for current settings, remote control and live view. The older R6 firmware supports held downloads, Single and Repeat.
+For PC use, download [DSO138 Studio for Windows x64](https://github.com/dodekm/dso138-firmware/releases/latest) and follow the [Studio quick start](../host/windows/README.md#quick-start). A USB-enabled companion firmware build is required for current settings, remote control and live view. The older R6 firmware supports held downloads, Single and Repeat.
 
 ## Upgrade notes
 

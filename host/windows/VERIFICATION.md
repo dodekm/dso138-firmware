@@ -1,5 +1,140 @@
 # DSO138 Studio verification
 
+## Studio 2.0.2 audit
+
+The starting point was local Studio 2.0.1 at `999a118`. Its portable
+ZIP matched its local SHA-256 sidecar. GitHub's latest release was
+`studio-v2.0.0` and its Windows ZIP matched the archived release digest.
+The reference companion firmware image matched its recorded SHA-256.
+It occupies 64,496 of 64,512 application bytes, with the final 1 KiB
+storage page and 2 KiB stack reservation outside the application load
+and BSS respectively.
+
+### Reproductions and fixes
+
+| Priority | Reproduction | Correction |
+| --- | --- | --- |
+| High, capture selection | Press Live record 1003 in the open history menu, deliver record 1006, then release at the same point. Studio 2.0.1 chose record 1006. | Buffer recent arrivals while the popup is visible. Apply them after the popup hides and retain the chosen record by capture identity. |
+| Medium, session ownership | Return a CRC-valid but malformed success acknowledgement for a frame release. Studio 2.0.1 ended the operation while the connection stayed open with uncertain lease ownership. | Reset the transport session when acknowledgement validation cannot establish ownership. |
+| Medium, held download | Click Download held immediately after Stop live. The reference board returned Busy twice in the audit. A second click after 400 ms downloaded the held record. | Give an explicit held download a bounded readiness wait when the device reports HOLD. A valid Busy reply can be retried within that window. |
+
+The Windows widget fixture exercised actual press and release events
+across a settings poll and across an incoming record. It also checked
+Connect, Disconnect, Repeat, Cancel, close during capture, one queued
+action, settings revision arbitration, Live admission and trigger
+draft retention. A separate history test held the menu open over 110
+arrivals and verified bounded catch-up, pinned selection, and resuming
+the newest record. The export fixture compared the selected frozen
+record's raw samples and metadata after history rollover.
+
+The data audit checked known frequency, period, duty cycle, amplitude,
+RMS and FFT results, and included short, clipped, uncalibrated and
+invalid records. It also verified exact native v2 sample and metadata
+round-trip, v1 import, calibrated and raw CSV values, and rejection of
+zero timer frequency. These are numerical and data-format checks.
+
+The transport fixture passed fragmentation, coalesced input, bad CRC,
+wrong response ID, same-ID retransmission after a lost reply, device
+timeout and Stale lease handling. It covered normal release, malformed
+capture and lease acknowledgements, cancellation during a leased read,
+and reconnect. The held-read fixture exercised an explicit Busy
+followed by success, a persistent Busy deadline, cancellation during
+the wait, and immediate rejection while the instrument reports RUN.
+
+The firmware review covered DMA half leases, polling limits,
+acquisition ownership, USB export bounds and cleanup, and storage
+offsets. The existing configured map records 112 bytes of initialized
+SRAM, 13,136 bytes of BSS and the 2,048-byte stack reservation. The
+previous board verification remains the evidence for device timing and
+storage preservation.
+
+### Desktop timing
+
+The same Windows harness measured both revisions with the same
+1,024-sample synthetic inputs. It exercised sine, square and dense
+waveforms, cursor movement, zoom, pan, a full history and the spectrum
+view. Native Windows Qt also rendered the three views at 100%, 150% and
+200% effective scale. The table gives median and 95th percentile in
+milliseconds from 60 renders per workload and scale.
+
+| Scale | Workload | 2.0.1 median / p95 | 2.0.2 median / p95 |
+| --- | --- | ---: | ---: |
+| 100% | Dense waveform | 1.35 / 2.05 | 1.19 / 1.87 |
+| 150% | Dense waveform | 4.05 / 4.99 | 4.01 / 5.08 |
+| 200% | Dense waveform | 5.46 / 6.72 | 4.01 / 4.88 |
+| 100% | Full window with spectrum | 4.23 / 5.28 | 4.24 / 5.79 |
+| 150% | Full window with spectrum | 7.17 / 9.22 | 9.18 / 11.40 |
+| 200% | Full window with spectrum | 11.93 / 14.47 | 9.06 / 12.16 |
+
+The audit fix addresses interaction correctness. These are one-PC
+timings and show variation between scales and runs.
+
+### Reference-board USB check
+
+The Windows widget run on the existing USB companion firmware applied
+1 ms/div, Auto, rising edge and level 2400, then received 12 live
+records of 1,024 samples. Freeze retained the selected capture while
+records continued to arrive. Unfreeze followed the newest record.
+Stop live followed by one Download held click returned a complete held
+record. The scope remained in HOLD.
+
+An independent repeat checked frozen metadata on every live record and
+measured 1,002.24 Hz with a 90-code peak-to-peak span on the onboard
+signal. This confirms signal presence on the exercised setup. Analog
+accuracy was outside the bench check.
+
+In the first passing run, the PC averaged 3.48 delivered records/s
+after startup. Capture completion took 187–299 ms and live transfers took
+49–51 ms. The held-record transfer took 48 ms. These numbers describe
+the tested setup and report capture and transfer time separately from
+desktop paint time.
+
+### Portable package
+
+The Windows x64 Release ZIP is 11,127,024 bytes. All 19 manifest
+entries matched and the extracted app launched on the development PC
+using all ten bundled DLLs and a Windows-only PATH.
+
+SHA-256 `45927f30156c838c43045ed18292a056333fa53a81bd1764157203961e98c559`.
+An independent clean Windows installation was unavailable.
+
+## Studio 2.0.1 responsiveness
+
+An automated Windows widget test pressed Single, started a background
+settings read, and released the button before the read completed. The
+capture request was sent once, after the settings reply. The same
+fixture checked Download held, the one-action queue, revision changes,
+live admission after readback, disconnect, and retention of unapplied
+trigger edits across a rejected or stale readback.
+
+The Release paint benchmark used 1,024 samples and a 1,300 × 780 logical
+pixel canvas at device pixel ratio 2. Median times are for synthetic
+records rendered on the development PC.
+
+| Paint workload | Studio 2.0 | Studio 2.0.1 |
+| --- | ---: | ---: |
+| Sine waveform | 55.6 ms | 2.2 ms |
+| Square waveform | 371.3 ms | 2.3 ms |
+| Dense waveform | 8,651 ms | 5.4 ms |
+| Full window on the spectrum tab | 70.4 ms | 13.2 ms |
+
+The spectrum comparison used the same spectrum renderer as Studio 2.0
+with the other 2.0.1 changes in place. The faster renderer uses a single
+thin trace, retains visible samples, and clips the waveform work to the
+current time view. Capture files and measurements still use the raw
+record.
+
+On the reference board, the Windows Start and Stop buttons completed a
+12-record live check at 1 ms/div. All records had 1,024 samples and the
+expected frozen trigger settings. The run averaged 3.74 delivered
+records/s after the initial capture. USB transfer took 49–52 ms per
+record and acquisition completion took 187–284 ms on those records.
+These timings separate device capture delays from local paint latency.
+
+The portable Windows x64 ZIP contains 19 manifest entries and launched
+from a fresh extraction using all ten bundled DLLs. SHA-256
+`433e9762594226c87bd60e64fc5c903553168a1dfca0ffc234409cd319eab0a7`.
+
 ## Studio 2.0
 
 | Area | Evidence |

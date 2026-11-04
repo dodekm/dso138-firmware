@@ -4,8 +4,8 @@
 #include <QObject>
 #include <QSerialPort>
 #include <QTimer>
+#include <functional>
 #include <memory>
-#include <optional>
 
 #include "capture.hpp"
 #include "protocol.hpp"
@@ -52,7 +52,6 @@ class Session final : public QObject
     }
     bool liveCaptureActive() const noexcept { return liveCapture_; }
     bool repeatedCaptureActive() const noexcept { return seriesTotal_ > 1; }
-    bool settingsReadInProgress() const noexcept;
     bool cancellable() const noexcept;
 
   public slots:
@@ -131,6 +130,7 @@ class Session final : public QObject
     void handleLiveStartRetrySettings(const protocol::Reply &reply);
     void handleSettingsWrite(const protocol::Reply &reply);
     bool canSubmitSettings() const noexcept;
+    bool deferUntilSettingsRead(std::function<void()> action);
     void submitSettingsWrite(quint8 opcode, QByteArray values = {});
     void startSettingsWrite(const SettingsWrite &write);
     void requestSettings();
@@ -194,7 +194,7 @@ class Session final : public QObject
     quint16 liveStartRetryRevision_{};
     bool trackHostInterval_{};
     bool extendedMetadataAvailable_{};
-    std::optional<SettingsWrite> queuedSettingsWrite_;
+    std::function<void()> deferredAction_;
     QString pendingFailure_;
     quint64 generation_{};
 };

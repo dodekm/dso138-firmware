@@ -4,7 +4,6 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -67,25 +66,19 @@ QString deltaVoltageLabel(double uv)
         return prefix + QString::number(uv / 1e3, 'g', 4) + QStringLiteral(" mV");
     return prefix + QString::number(uv, 'g', 4) + QStringLiteral(" µV");
 }
-QString sampleValueLabel(const Capture &capture, double time, bool physical)
+std::size_t nearestSample(const Capture &capture, double time)
 {
-    if (capture.raw.empty())
-        return QStringLiteral("—");
-    std::size_t best = 0;
-    double bestDistance = std::numeric_limits<double>::infinity();
-    for (std::size_t i = 0; i < capture.raw.size(); ++i)
-    {
-        const double t = sampleTime(capture.metadata, i), distance = std::abs(t - time);
-        if (std::isfinite(distance) && distance < bestDistance)
-        {
-            best = i;
-            bestDistance = distance;
-        }
-    }
-    if (physical)
-        if (auto uv = sampleMicrovolts(capture.metadata, capture.raw[best]))
-            return voltageLabel(static_cast<double>(*uv));
-    return QStringLiteral("%1 ADC").arg(capture.raw[best]);
+    const auto &m = capture.metadata;
+    if (m.divider == 0 || m.timerHz == 0 || !std::isfinite(time))
+        return 0;
+    const auto end = capture.raw.size() - 1;
+    const double index = std::clamp(time * m.timerHz / m.divider + m.pretrigger,
+                                    0.0, static_cast<double>(end));
+    const auto left = static_cast<std::size_t>(index);
+    const auto right = std::min(left + 1, end);
+    return std::abs(sampleTime(m, right) - time) < std::abs(sampleTime(m, left) - time)
+               ? right
+               : left;
 }
 } // namespace
 
@@ -100,6 +93,7 @@ WaveformWidget::WaveformWidget(QWidget *parent) : QWidget(parent)
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setAutoFillBackground(false);
+    setAttribute(Qt::WA_OpaquePaintEvent);
 }
 
 void WaveformWidget::setCapture(std::shared_ptr<const Capture> capture, ViewPolicy view)
@@ -255,24 +249,32 @@ void WaveformWidget::paintEvent(QPaintEvent *)
                    QStringLiteral("Connect the scope and acquire a trace"));
         return;
     }
-    QPainterPath path;
-    bool started = false;
     const auto &raw = capture_->raw;
-    for (std::size_t i = 0; i < raw.size(); ++i)
+    const auto &metadata = capture_->metadata;
+    QPolygonF trace;
+    double verticalTravel = 0.0;
+    if (metadata.timerHz != 0 && metadata.divider != 0 &&
+        sampleTime(metadata, 0) <= timeStart_ + timeSpan_ &&
+        sampleTime(metadata, raw.size() - 1) >= timeStart_)
     {
-        auto uv = sampleMicrovolts(capture_->metadata, raw[i]);
-        const double t = sampleTime(capture_->metadata, i);
-        if (!std::isfinite(t))
-            continue;
-        const double value = physicalUnits_ ? static_cast<double>(uv.value_or(raw[i])) : raw[i];
-        QPointF pt(xForTime(t, a), yForValue(value, a));
-        if (!started)
+        const auto edgeIndex = [&](double t) {
+            return std::clamp(t * metadata.timerHz / metadata.divider + metadata.pretrigger,
+                              0.0, static_cast<double>(raw.size() - 1));
+        };
+        // Keep the samples on both sides of the viewport so boundary segments
+        // are still drawn up to the clip rectangle.
+        const auto first = static_cast<std::size_t>(std::floor(edgeIndex(timeStart_)));
+        const auto last = static_cast<std::size_t>(std::ceil(edgeIndex(timeStart_ + timeSpan_)));
+        trace.reserve(static_cast<qsizetype>(last - first + 1));
+        for (std::size_t i = first; i <= last; ++i)
         {
-            path.moveTo(pt);
-            started = true;
+            const double value = physicalUnits_ ? sampleMicrovolts(metadata, raw[i]).value_or(raw[i])
+                                                : raw[i];
+            const double y = yForValue(value, a);
+            if (!trace.isEmpty())
+                verticalTravel += std::abs(y - trace.back().y());
+            trace.append(QPointF(xForTime(sampleTime(metadata, i), a), y));
         }
-        else
-            path.lineTo(pt);
     }
     p.save();
     p.setClipRect(r.adjusted(1, 1, -1, -1));
@@ -282,10 +284,16 @@ void WaveformWidget::paintEvent(QPaintEvent *)
         p.setPen(QPen(triggerColor, 1, Qt::DashLine));
         p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
     }
-    p.setPen(QPen(QColor(80, 215, 232, 40), 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawPath(path);
-    p.setPen(QPen(cyan, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawPath(path);
+    // Dense traces repeatedly cross the same pixels. Use the raster engine's
+    // thin polyline path for those traces, keeping all visible raw samples.
+    const bool dense = verticalTravel > 24.0 * r.height();
+    if (trace.size() > 1)
+    {
+        p.setRenderHint(QPainter::Antialiasing, !dense);
+        p.setPen(QPen(cyan, 0));
+        p.drawPolyline(trace);
+        p.setRenderHint(QPainter::Antialiasing, true);
+    }
     if (cursorsVisible_)
     {
         for (int i = 0; i < 2; ++i)
@@ -440,33 +448,18 @@ void WaveformWidget::updateCursorDelta()
     QString valueA = QStringLiteral("—"), valueB = QStringLiteral("—"), delta = QStringLiteral("—");
     if (capture_ && !capture_->raw.empty())
     {
-        valueA = sampleValueLabel(*capture_, cursorTimes_[0], physicalUnits_);
-        valueB = sampleValueLabel(*capture_, cursorTimes_[1], physicalUnits_);
-        std::size_t ia = 0, ib = 0;
-        double da = std::numeric_limits<double>::infinity(), db = da;
-        for (std::size_t i = 0; i < capture_->raw.size(); ++i)
-        {
-            const double t = sampleTime(capture_->metadata, i);
-            const double aa = std::abs(t - cursorTimes_[0]), bb = std::abs(t - cursorTimes_[1]);
-            if (aa < da)
-            {
-                da = aa;
-                ia = i;
-            }
-            if (bb < db)
-            {
-                db = bb;
-                ib = i;
-            }
-        }
-        const auto ua = sampleMicrovolts(capture_->metadata, capture_->raw[ia]),
-                   ub = sampleMicrovolts(capture_->metadata, capture_->raw[ib]);
+        const auto a = capture_->raw[nearestSample(*capture_, cursorTimes_[0])];
+        const auto b = capture_->raw[nearestSample(*capture_, cursorTimes_[1])];
+        const auto ua = sampleMicrovolts(capture_->metadata, a),
+                   ub = sampleMicrovolts(capture_->metadata, b);
+        valueA = ua ? voltageLabel(static_cast<double>(*ua)) : QStringLiteral("%1 ADC").arg(a);
+        valueB = ub ? voltageLabel(static_cast<double>(*ub)) : QStringLiteral("%1 ADC").arg(b);
         if (ua && ub)
             delta = deltaVoltageLabel(static_cast<double>(*ub - *ua));
         else
             delta =
                 QStringLiteral("%1 ADC codes")
-                    .arg(static_cast<int>(capture_->raw[ib]) - static_cast<int>(capture_->raw[ia]));
+                    .arg(static_cast<int>(b) - static_cast<int>(a));
     }
     emit cursorDeltaChanged(QStringLiteral("Δt %1 · ΔV %2\nA %3 · B %4")
                                 .arg(timeLabel(std::abs(cursorTimes_[1] - cursorTimes_[0])))

@@ -4,6 +4,7 @@
 #include "session.hpp"
 
 #include <QMainWindow>
+#include <deque>
 #include <memory>
 #include <vector>
 
@@ -31,12 +32,20 @@ class MainWindow final : public QMainWindow
 
   protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
   private:
     struct Record
     {
         std::shared_ptr<const Capture> capture;
         QString source;
+    };
+    struct PendingRecord
+    {
+        Capture capture;
+        QString source;
+        bool replaceDemo;
+        bool preserveView;
     };
 
     void buildUi();
@@ -49,6 +58,7 @@ class MainWindow final : public QMainWindow
     void showRecord(int index, bool preserveView = false);
     void addRecord(Capture capture, QString source, bool replace, bool selectLatest = true,
                    bool preserveView = false);
+    void flushPendingHistory();
     void beginOperation(const QString &text);
     void configureSeries();
     void chooseOpen();
@@ -93,6 +103,7 @@ class MainWindow final : public QMainWindow
     QLabel *measurementQuality_{};
     QLabel *cursorDelta_{};
     QLabel *status_{};
+    QLabel *liveTiming_{};
     QProgressBar *progress_{};
     QAction *openAction_{};
     QAction *demoAction_{};
@@ -100,6 +111,7 @@ class MainWindow final : public QMainWindow
     QAction *exportAction_{};
     QAction *freezeAction_{};
     std::vector<Record> history_;
+    std::deque<PendingRecord> pendingHistory_;
     std::uint32_t previousDisplayEpoch_{};
     bool haveDisplayEpoch_{};
     int liveFramesReceived_{};

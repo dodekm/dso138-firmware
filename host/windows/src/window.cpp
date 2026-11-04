@@ -3,6 +3,7 @@
 #include "trigger_controls.hpp"
 #include "waveform.hpp"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -38,6 +39,8 @@ namespace dso
 {
 namespace
 {
+constexpr std::size_t maxHistory = 100;
+
 QString scaledVoltage(double uv)
 {
     const double a = std::abs(uv);
@@ -180,26 +183,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), session_()
         const auto metadata = frame.metadata;
         const bool preserveView = session_.liveCaptureActive() && liveFramesReceived_ > 0 &&
                                   !freezeDisplay_;
-        addRecord(std::move(frame), source, replaceOnNextFrame_, !freezeDisplay_, preserveView);
+        if (records_->view()->isVisible() || !pendingHistory_.empty())
+        {
+            if (pendingHistory_.size() == maxHistory)
+                pendingHistory_.pop_front();
+            pendingHistory_.push_back({std::move(frame), source, replaceOnNextFrame_, preserveView});
+        }
+        else
+        {
+            addRecord(std::move(frame), source, replaceOnNextFrame_, !freezeDisplay_, preserveView);
+            if (!session_.liveCaptureActive())
+                report(QStringLiteral("Capture added to history (%1 of %2).")
+                           .arg(history_.size())
+                           .arg(maxHistory));
+        }
         replaceOnNextFrame_ = false;
         if (session_.liveCaptureActive())
             ++liveFramesReceived_;
         const auto &m = metadata;
-        if (m.hostIntervalBeforeMs != 0xffffffffU)
+        if (session_.liveCaptureActive() && m.hostIntervalBeforeMs != 0xffffffffU)
         {
             const double updateRate = m.hostIntervalBeforeMs == 0
                                           ? 0.0
                                           : 1000.0 / static_cast<double>(m.hostIntervalBeforeMs);
             const std::uint32_t epochStep = haveDisplayEpoch_ ? m.acquisitionEpoch - previousDisplayEpoch_ : 0;
-            status_->setText(QStringLiteral("Successive captures · host update %1 records/s · host-observed interval before this record %2 ms · device epoch step %3 (not a dropped-record count)")
+            liveTiming_->setText(QStringLiteral("%1 records/s · %2 ms · epoch +%3")
                                  .arg(updateRate, 0, 'g', 4)
                                  .arg(m.hostIntervalBeforeMs)
                                  .arg(haveDisplayEpoch_ ? QString::number(epochStep) : QStringLiteral("—")));
+            liveTiming_->show();
         }
         previousDisplayEpoch_ = m.acquisitionEpoch;
         haveDisplayEpoch_ = true;
     });
     connect(&session_, &Session::liveStateChanged, this, [this](bool active, const QString &description) {
+        liveTiming_->hide();
         live_->setText(active ? QStringLiteral("Stop live") : QStringLiteral("Start live"));
         live_->setProperty("accent", active ? "danger" : "primary");
         live_->style()->unpolish(live_);
@@ -213,8 +231,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), session_()
             freezeAction_->setChecked(false);
             report(QStringLiteral("LIVE · %1 mode · successive captures; HOLD is required. No continuous sample stream.")
                        .arg(description));
-            status_->setToolTip(QStringLiteral(
-                "The record rate and inter-record interval are measured at the PC. Device epoch steps identify sequence changes, not a count of dropped USB records or missing ADC samples."));
         }
         else if (!description.isEmpty())
             report(description);
@@ -597,10 +613,11 @@ void MainWindow::buildUi()
     rc->setContentsMargins(12, 10, 12, 10);
     rc->addWidget(caption(QStringLiteral("CAPTURE")));
     records_ = new QComboBox;
+    records_->view()->installEventFilter(this);
     records_->setObjectName(QStringLiteral("captureSelector"));
     rc->addWidget(records_);
     connect(records_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (session_.liveCaptureActive())
+        if (session_.liveCaptureActive() || !pendingHistory_.empty())
         {
             freezeDisplay_ = index > 0;
             const QSignalBlocker blocker(freezeAction_);
@@ -670,7 +687,15 @@ void MainWindow::buildUi()
     measurementLayout->addStretch();
     status_ = new QLabel(QStringLiteral("Ready"));
     status_->setObjectName(QStringLiteral("statusMessage"));
+    status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     statusBar()->addWidget(status_, 1);
+    liveTiming_ = new QLabel;
+    liveTiming_->setObjectName(QStringLiteral("liveTiming"));
+    liveTiming_->setToolTip(QStringLiteral(
+        "Host record delivery rate and interval. The epoch step identifies device sequence changes; "
+        "it does not count dropped USB records or missing ADC samples."));
+    statusBar()->addPermanentWidget(liveTiming_);
+    liveTiming_->hide();
 }
 
 void MainWindow::refreshPorts()
@@ -724,7 +749,6 @@ void MainWindow::toggleConnection()
 void MainWindow::updateControls()
 {
     const bool busy = session_.busy(), connected = session_.connected(), online = connected;
-    const bool interactiveBusy = busy && !session_.settingsReadInProgress();
     ports_->setEnabled(!busy && !connected && !connecting_);
     connect_->setEnabled(!busy && !connecting_ &&
                          (connected || !ports_->currentData().toString().isEmpty()));
@@ -754,11 +778,11 @@ void MainWindow::updateControls()
     const bool knownTimebase = currentInstrumentSettings_.catalogueId == 1 &&
                                currentInstrumentSettings_.catalogueCount != 0 &&
                                currentInstrumentSettings_.timebaseIndex < classicTimebases.size();
-    timebaseControl_->setEnabled(!interactiveBusy && settingsSupported && writesAdmissible && knownTimebase &&
+    timebaseControl_->setEnabled(!busy && settingsSupported && writesAdmissible && knownTimebase &&
                                  (currentInstrumentSettings_.writableMask & 0x01U) != 0);
-    triggerModeControl_->setEnabled(!interactiveBusy && settingsSupported && writesAdmissible &&
+    triggerModeControl_->setEnabled(!busy && settingsSupported && writesAdmissible &&
                                     (currentInstrumentSettings_.writableMask & 0x02U) != 0);
-    triggerControls_->setInteractive(online && !interactiveBusy);
+    triggerControls_->setInteractive(online && !busy);
 }
 
 void MainWindow::populateSettingsControls(const protocol::Settings &settings,
@@ -946,7 +970,6 @@ void MainWindow::addRecord(Capture capture, QString source, bool replace, bool s
                                     .arg(titleFor(record))
                                     .arg(record.capture->raw.size()));
     }
-    constexpr std::size_t maxHistory = 100;
     if (history_.size() > maxHistory)
     {
         std::size_t evict = history_.size() - 1;
@@ -971,13 +994,36 @@ void MainWindow::addRecord(Capture capture, QString source, bool replace, bool s
     }
     if (selectLatest || !keepDisplayed)
         showRecord(selected, preserveView);
-    report(QStringLiteral("Capture added to history (%1 of %2).")
-               .arg(history_.size())
-               .arg(maxHistory));
+}
+
+void MainWindow::flushPendingHistory()
+{
+    if (pendingHistory_.empty() || records_->view()->isVisible())
+        return;
+    const bool preserveView = pendingHistory_.back().preserveView;
+    for (auto &record : pendingHistory_)
+        addRecord(std::move(record.capture), std::move(record.source), record.replaceDemo, false);
+    pendingHistory_.clear();
+    if (!freezeDisplay_)
+    {
+        const QSignalBlocker blocker(records_);
+        records_->setCurrentIndex(0);
+        showRecord(0, preserveView);
+    }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::Hide && records_ && watched == records_->view())
+    {
+        // The popup may close before QComboBox commits the activated item.
+        QTimer::singleShot(0, this, &MainWindow::flushPendingHistory);
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 void MainWindow::beginOperation(const QString &text)
 {
-    status_->setText(text);
+    report(text);
     progress_->setValue(0);
     progress_->setFormat(QStringLiteral("Working…"));
 }
@@ -1056,6 +1102,7 @@ void MainWindow::saveSelected(bool csv)
 }
 void MainWindow::report(QString text)
 {
+    status_->setToolTip(text);
     status_->setText(std::move(text));
 }
 void MainWindow::closeEvent(QCloseEvent *event)

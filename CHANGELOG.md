@@ -1,5 +1,17 @@
 # Changelog
 
+## Studio 2.0.2
+
+- Keep capture history rows stable while the selection menu is open and catch up after it closes.
+- Recover the USB session when a malformed acknowledgement leaves capture or frame ownership uncertain.
+- Wait briefly for the held record when a download follows Stop live.
+
+## Studio 2.0.1
+
+- Keep capture buttons available during background settings reads and run the first pending action after readback.
+- Keep unapplied trigger edits available when a settings write is rejected.
+- Reduce redraw cost for waveforms and spectra, and display live timing separately from action messages.
+
 ## Studio 2.0 and companion firmware
 
 - Add live instrument readback and remote timebase and trigger settings.

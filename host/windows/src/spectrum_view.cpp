@@ -7,7 +7,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
-#include <QPainterPath>
 #include <QStringList>
 #include <QVBoxLayout>
 
@@ -208,9 +207,9 @@ class SpectrumPlotWidget final : public QWidget
         painter.drawText(QRectF(plot.left(), height() - 19.0, plot.width(), 16.0),
                          Qt::AlignCenter, QStringLiteral("Frequency"));
 
-        QPainterPath trace;
-        bool started = false;
+        QPolygonF trace;
         const std::size_t count = std::min(spectrum_.frequencyHz.size(), amplitudes.size());
+        trace.reserve(static_cast<qsizetype>(count));
         for (std::size_t bin = 0U; bin < count; ++bin)
         {
             const double frequency = spectrum_.frequencyHz[bin];
@@ -219,24 +218,13 @@ class SpectrumPlotWidget final : public QWidget
             {
                 continue;
             }
-            const QPointF point(plot.left() + frequency / nyquist * plot.width(),
-                                plot.bottom() - std::clamp(amplitude / top, 0.0, 1.0) * plot.height());
-            if (!started)
-            {
-                trace.moveTo(point);
-                started = true;
-            }
-            else
-            {
-                trace.lineTo(point);
-            }
+            trace.append(QPointF(plot.left() + frequency / nyquist * plot.width(),
+                                 plot.bottom() - std::clamp(amplitude / top, 0.0, 1.0) * plot.height()));
         }
         painter.save();
         painter.setClipRect(plot.adjusted(-1.0, -1.0, 1.0, 1.0));
-        painter.setPen(QPen(QColor(80, 215, 232, 40), 5.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPath(trace);
-        painter.setPen(QPen(cyan, 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPath(trace);
+        painter.setPen(QPen(cyan, 0));
+        painter.drawPolyline(trace);
 
         const std::size_t markerCount = std::min<std::size_t>(3U, spectrum_.dominantPeaks.size());
         for (std::size_t i = 0U; i < markerCount; ++i)

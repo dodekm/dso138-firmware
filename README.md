@@ -4,7 +4,7 @@ C++17 firmware for the JYE Tech DSO138 digital oscilloscope, built with STM32 HA
 
 [User manual (PDF)](docs/manual/dso138-user-manual.pdf) · [Getting started](docs/getting-started.md) · [Build instructions](docs/building.md) · [Release readiness](docs/release-readiness.md) · [Compatibility](docs/compatibility.md) · [Trigger LED](docs/trigger-led.md)
 
-[Download DSO138 Studio 2.0 for Windows x64](https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0)
+[Download the latest DSO138 Studio for Windows x64](https://github.com/dodekm/dso138-firmware/releases/latest)
 
 Upgrading to v2.0.0? Review the changes to storage, timebases and measurement readouts in the [upgrade notes](docs/getting-started.md#upgrade-notes).
 

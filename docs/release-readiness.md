@@ -1,6 +1,6 @@
 # Release verification
 
-The current release pairs DSO138 Studio 2.0 with companion firmware for the classic DSO138 PCB 109-13800-00C with an STM32F103C8T6 and ILI9341. Owners configure their board identity and build the firmware. USB is off by default. See the [Windows release](https://github.com/dodekm/dso138-firmware/releases/tag/studio-v2.0.0) and [build instructions](building.md).
+Studio 2.0.2 works with the companion firmware for the classic DSO138 PCB 109-13800-00C with an STM32F103C8T6 and ILI9341. Owners configure their board identity and build the firmware. USB is off by default. See the [Windows release](https://github.com/dodekm/dso138-firmware/releases/latest), [Studio audit](../host/windows/VERIFICATION.md#studio-202-audit) and [build instructions](building.md).
 
 ## Current Studio 2 reference results
 
