@@ -1,4 +1,5 @@
 #include "dso_stm32_panel.hpp"
+#include "dso_adc_codes.hpp"
 #include "dso_stm32_adc.hpp"
 #include "main.h"
 
@@ -152,7 +153,7 @@ PanelPollResult poll_conversion(void* context) noexcept
         return {PanelPollState::Pending, 0U};
     }
     const auto value = HAL_ADC_GetValue(&hadc2); // Reading DR consumes EOC.
-    if (!stop_adc2_bounded() || value > 4095U) {
+    if (!stop_adc2_bounded() || value > AdcMax) {
         fail_binding();
         return {PanelPollState::Fault, 0U};
     }

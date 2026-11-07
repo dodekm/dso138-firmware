@@ -1,4 +1,12 @@
 #include "dso_scaling.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_dma_ring.hpp"
+#include "dso_frame_metadata.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_settings_contract.hpp"
+#include "dso_timebase.hpp"
+#include "dso_u32_counter.hpp"
 #include "dso_u64_division.hpp"
 #include "dso_timebase_presets.hpp"
 #include "dso_voltage_math.hpp"
@@ -7,10 +15,9 @@
 
 namespace dso {
 namespace {
-constexpr std::uint32_t Timebases[ScopeTimebaseCount]{
-    10U,20U,50U,100U,200U,500U,1000U,2000U,5000U,10000U,20000U,50000U,
-    100000U,200000U,500000U,1000000U,2000000U,5000000U
-};
+constexpr std::uint32_t MaximumTimebaseUs{
+    timebase_contract::ClassicMicrosecondsPerDivision[ScopeTimebaseCount - 1U]};
+
 constexpr std::uint32_t catalogue_timebase(std::uint8_t index) noexcept
 {
     if (index >= ScopeTimebaseCount) { return 0U; }
@@ -22,35 +29,34 @@ constexpr std::uint32_t catalogue_timebase(std::uint8_t index) noexcept
 }
 constexpr bool timebase_catalogue_matches() noexcept
 {
-    if (sizeof(detail::PresetTimebases)/sizeof(detail::PresetTimebases[0]) != ScopeTimebaseCount) { return false; }
     for (unsigned index{}; index < ScopeTimebaseCount; ++index) {
-        if (Timebases[index] != detail::PresetTimebases[index] ||
-            Timebases[index] != catalogue_timebase(static_cast<std::uint8_t>(index))) { return false; }
+        const auto timebase = timebase_contract::ClassicMicrosecondsPerDivision[index];
+        if (timebase != catalogue_timebase(static_cast<std::uint8_t>(index))) { return false; }
     }
     return true;
 }
 static_assert(timebase_catalogue_matches(),
-              "Regenerate timer presets when the timebase catalogue changes");
-static_assert(ScopeTimebaseCount == 18U && DmaHalfSamples == 512U &&
+              "Review the shared catalogue when the timebase progression changes");
+static_assert(DmaHalfSamples == 512U &&
               sizeof(detail::ScopePresets)/sizeof(detail::ScopePresets[0]) == ScopeTimebaseCount,
               "Timer presets require the current fixed capture profile");
-constexpr std::int32_t MaximumZero{4095 * 65536};
 
 bool settings_valid(const FrameMetadata& metadata, const ProjectionSettings& view) noexcept
 {
     const auto& timing = metadata.timing;
-    return view.time_us_per_div >= 10U && view.time_us_per_div <= Timebases[ScopeTimebaseCount-1U] &&
+    return view.time_us_per_div >= 10U && view.time_us_per_div <= MaximumTimebaseUs &&
         view.width >= 2U && view.width <= WaveformColumnCapacity && view.height >= 2U &&
         view.height <= DisplayHeight && view.pixels_per_div > 0U &&
-        view.pixels_per_div <= DisplayHeight && view.trigger_position_permille <= 1000U &&
+        view.pixels_per_div <= DisplayHeight &&
+        view.trigger_position_permille <= settings_contract::TriggerPositionPermilleMaximum &&
         view.horizontal_offset_samples >= -1024 && view.horizontal_offset_samples <= 1024 &&
-        metadata.physical.generation != 0U && metadata.physical.microvolts_per_div >= 10000U &&
-        metadata.physical.microvolts_per_div <= 5000000U &&
+        metadata.physical.generation != 0U &&
+        metadata.physical.microvolts_per_div >= MinimumPhysicalMicrovoltsPerDivision &&
+        metadata.physical.microvolts_per_div <= MaximumPhysicalMicrovoltsPerDivision &&
         (metadata.physical.coupling == InputCoupling::Dc ||
          metadata.physical.coupling == InputCoupling::Ac ||
          metadata.physical.coupling == InputCoupling::Ground) &&
-        timing.timer_hz >= 1000000U && timing.timer_hz <= 72000000U && timing.divider != 0U &&
-        (std::uint64_t{timing.prescaler} + 1U) * (std::uint64_t{timing.period} + 1U) == timing.divider;
+        valid_record_timing(timing);
 }
 
 std::int64_t rounded_signed(std::int64_t numerator, std::uint64_t denominator) noexcept
@@ -76,28 +82,10 @@ std::int64_t sample_position_x(std::uint16_t index, std::uint16_t pretrigger,
         std::uint64_t{timer_hz} * view.time_us_per_div * 10U);
     const auto offset = static_cast<std::int64_t>(q.quotient +
         (delta < 0 && q.remainder != 0U ? 1U : 0U));
-    const auto trigger = std::uint32_t{view.trigger_position_permille} * view.width / 1000U;
+    const auto trigger = std::uint32_t{view.trigger_position_permille} * view.width /
+        settings_contract::TriggerPositionPermilleMaximum;
     return std::int64_t{trigger} + (delta < 0 ? -offset : offset);
 }
-}
-
-bool calibration_valid(VoltageCalibration calibration) noexcept
-{
-    return (calibration.kind == CalibrationKind::Nominal || calibration.kind == CalibrationKind::Measured) &&
-        calibration.zero_code_q16 >= 0 && calibration.zero_code_q16 <= MaximumZero &&
-        calibration.microvolts_per_code_q16 != 0U && calibration.gain_shift <= 2U &&
-        (calibration.gain_shift == 0U || calibration.microvolts_per_code_q16 >= 0x80000000U);
-}
-
-bool code_to_microvolts(std::uint16_t code, VoltageCalibration calibration,
-                         std::int64_t& microvolts) noexcept
-{
-    if (code > 4095U || !calibration_valid(calibration)) { return false; }
-    const auto delta = std::int64_t{code} * 65536 - calibration.zero_code_q16;
-    // |delta|<=268369920, gain<=UINT32_MAX: product<2^60, including rounding.
-    microvolts = detail::round_gain_product(delta * calibration.microvolts_per_code_q16,
-        calibration.gain_shift);
-    return true;
 }
 
 std::uint32_t scope_timebase_us(std::uint8_t index) noexcept
@@ -112,7 +100,8 @@ bool plan_scope_timebase(std::uint8_t index, ScopeTimebasePlan& out) noexcept
     // tie rule. The catalogue comparison above rejects stale generated data.
     const auto pair = detail::ScopePresets[index];
     const auto divider = (std::uint32_t{pair.prescaler}+1U) * (std::uint32_t{pair.period}+1U);
-    if (std::uint64_t{divider} * DmaHalfSamples >= std::uint64_t{0x80000000U}) { return false; }
+    if (std::uint64_t{divider} * DmaHalfSamples >=
+        std::uint64_t{counter_contract::U32HalfRange}) { return false; }
     out = ScopeTimebasePlan{{pair.prescaler,pair.period,72000000U,divider,12000000U,46U},
                             ScopeTimebaseSupport::CircularDma};
     return true;
@@ -122,10 +111,10 @@ bool project_code_y(std::uint16_t code, const FrameMetadata& metadata,
                     VoltageCalibration calibration, const ProjectionSettings& view,
                     std::int32_t& y) noexcept
 {
-    if (code > 4095U || !settings_valid(metadata,view)) { return false; }
+    if (code > AdcMax || !settings_valid(metadata,view)) { return false; }
     std::int64_t result{};
     if (calibration.kind == CalibrationKind::Unavailable) {
-        result = static_cast<std::int64_t>((std::uint32_t{4095U-code} * (view.height-1U) + 2047U)/4095U) +
+        result = static_cast<std::int64_t>(((std::uint32_t{AdcMax} - code) * (view.height-1U) + AdcMax/2U)/AdcMax) +
             view.vertical_offset_pixels;
     } else {
         std::int64_t voltage{};
@@ -142,7 +131,7 @@ bool project_trigger_x(const FrameMetadata& metadata, const ProjectionSettings& 
                         std::int64_t& x) noexcept
 {
     if (!settings_valid(metadata,view) || metadata.capture.length == 0U ||
-        metadata.capture.length > DisplayMaxSamples ||
+        metadata.capture.length > CaptureCapacity ||
         metadata.capture.pretrigger >= metadata.capture.length) { return false; }
     x = sample_position_x(metadata.capture.pretrigger,metadata.capture.pretrigger,
                           metadata.timing.divider,
@@ -156,7 +145,7 @@ bool WaveformProjector::begin(const std::uint16_t* samples, std::uint16_t count,
 {
     output.available = false;
     state_ = ProjectionState::Invalid;
-    if (samples == nullptr || count == 0U || count > DisplayMaxSamples ||
+    if (samples == nullptr || count == 0U || count > CaptureCapacity ||
         metadata.capture.length != count || metadata.capture.pretrigger >= count ||
         !settings_valid(metadata,view) ||
         (calibration.kind != CalibrationKind::Unavailable && !calibration_valid(calibration))) { return false; }
@@ -184,7 +173,7 @@ std::int32_t WaveformProjector::sample_y(std::uint16_t sample) const noexcept
     // Their accepted bounds keep |voltage| <= 1,073,479,680 uV and |y| <
     // 25.8 million, so the public conversion's int32 range check cannot fail.
     if (calibration_.kind == CalibrationKind::Unavailable) {
-        return static_cast<std::int32_t>((std::uint32_t{4095U-sample} * (view_.height-1U) + 2047U)/4095U) +
+        return static_cast<std::int32_t>(((std::uint32_t{AdcMax} - sample) * (view_.height-1U) + AdcMax/2U)/AdcMax) +
             view_.vertical_offset_pixels;
     }
     const auto delta = std::int64_t{sample} * 65536 - calibration_.zero_code_q16;
@@ -258,7 +247,7 @@ ProjectionStep WaveformProjector::step(std::uint16_t sample_budget,
         if (used.samples == sample_budget) { break; }
         const auto sample = samples_[next_sample_];
         used.samples++;
-        if (sample > 4095U) { state_ = ProjectionState::Invalid; output_->available = false; break; }
+        if (sample > AdcMax) { state_ = ProjectionState::Invalid; output_->available = false; break; }
         target_x_ = sample_x(next_sample_); target_y_ = sample_y(sample); next_sample_++;
         if (!have_previous_) {
             previous_x_ = target_x_; previous_y_ = target_y_; have_previous_ = true;

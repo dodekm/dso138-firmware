@@ -1,6 +1,6 @@
 #include "spectrum_view.hpp"
 
-#include "capture.hpp"
+#include "capture_model.hpp"
 #include "spectrum.hpp"
 
 #include <QComboBox>

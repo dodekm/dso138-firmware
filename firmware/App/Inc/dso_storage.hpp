@@ -1,6 +1,7 @@
 #ifndef DSO_STORAGE_HPP
 #define DSO_STORAGE_HPP
 
+#include "dso_crc32.hpp"
 #include <array>
 #include <cstdint>
 
@@ -107,7 +108,7 @@ private:
     // before erase or payload programming can begin.
     std::array<std::uint8_t, StoragePayloadWriteMaximum> staged_payload_;
     std::array<std::uint8_t, StorageHeaderBytes> header_;
-    std::uint32_t crc_{0xffffffffU};
+    std::uint32_t crc_{checksum::Crc32IeeeInitial};
     std::uint32_t generation_{};
     std::uint16_t offset_{};
     std::uint16_t bytes_{};

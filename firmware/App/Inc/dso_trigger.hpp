@@ -5,6 +5,8 @@
 
 namespace dso {
 
+// Shared trigger policy used by the capture engine and UI settings model.
+enum class TriggerMode { Normal, Auto, Single };
 enum class TriggerEdge { Rising, Falling };
 
 // Foreground sample-domain Schmitt rearming shared by both acquisition paths.

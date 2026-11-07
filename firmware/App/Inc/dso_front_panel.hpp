@@ -2,12 +2,11 @@
 #define DSO_FRONT_PANEL_HPP
 
 #include "dso_controls.hpp"
+#include "dso_physical_settings.hpp"
 
 #include <cstdint>
 
 namespace dso {
-
-enum class InputCoupling : std::uint8_t { Unknown, Dc, Ac, Ground };
 
 struct FrontPanelConfig final {
     SenseBands sen1_bands;
@@ -33,16 +32,6 @@ struct PanelObservation final {
     std::uint16_t gpio_b_idr;
     std::uint32_t now_ms;
     bool senses_valid;
-};
-
-/* Metadata is copied by value into a frozen acquisition. The scale is the
- * nominal front-panel label, not a calibrated ADC-code conversion factor.
- * generation=0, scale=0 and Unknown coupling mean the physical state is invalid.
- */
-struct PhysicalSettings final {
-    std::uint32_t generation;
-    std::uint32_t microvolts_per_div;
-    InputCoupling coupling;
 };
 
 struct PanelUpdate final {

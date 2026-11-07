@@ -1,9 +1,9 @@
 #include "dso_front_panel.hpp"
+#include "dso_u32_counter.hpp"
 
 namespace dso {
 namespace {
 
-constexpr std::uint32_t HalfRange{0x80000000U};
 constexpr std::uint16_t InvalidAdc{4096U};
 
 std::uint32_t nominal_base(SwitchPosition position) noexcept
@@ -57,7 +57,7 @@ FrontPanel::FrontPanel(const FrontPanelConfig& config) noexcept
                 config.maximum_poll_gap_ms},
       buttons_{config.button_debounce_ms, config.maximum_poll_gap_ms},
       analog_settling_ms_{config.analog_settling_ms},
-      valid_settling_{config.analog_settling_ms < HalfRange}
+      valid_settling_{config.analog_settling_ms < counter_contract::U32HalfRange}
 {
 }
 
@@ -87,7 +87,7 @@ PanelUpdate FrontPanel::update(const PanelObservation& observation) noexcept
             settling_since_ = observation.now_ms;
         }
         const auto age = static_cast<std::uint32_t>(observation.now_ms - settling_since_);
-        if (age >= HalfRange) {
+        if (age >= counter_contract::U32HalfRange) {
             settling_since_ = observation.now_ms;
         } else if (age >= analog_settling_ms_) {
             generation_ = next_panel_generation(generation_);

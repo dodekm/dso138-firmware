@@ -1,7 +1,7 @@
 #ifndef DSO_USB_CDC_HPP
 #define DSO_USB_CDC_HPP
 
-#include "dso_usb_protocol.hpp"
+#include "dso_usb_transport.hpp"
 #include <array>
 #include <cstdint>
 

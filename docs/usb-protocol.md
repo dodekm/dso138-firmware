@@ -1,11 +1,23 @@
 # DSO waveform protocol v1
 
 This document describes the host-facing command protocol implemented by
-`dso_usb_protocol.cpp` and `dso_usb_service.cpp`. The transport supplies
+`dso_usb_requests.cpp` and serviced by `dso_usb_service.cpp`;
+`dso_usb_protocol.cpp` supplies the CRC adapter. The transport supplies
 configured-session identity and nonblocking packet read/write. See the
 [USB hardware and driver contract](usb-hardware.md) for the opt-in
 stock-board trial. Studio 2 adds optional live settings operations to
 the original waveform and Single-capture commands.
+
+The shared version, magic bytes, frame layout/bounds, opcode/status values,
+GET_SETTINGS capability/readiness bits and samples-per-read limit are defined
+in `shared/include/dso_usb_protocol_contract.hpp`; it aliases record capacity
+from `shared/include/dso_capture_contract.hpp`. The ADC resolution reported by
+INFO comes from `shared/include/dso_adc_contract.hpp`. Host capture-state values
+and other stable instrument codes and capture flags are in
+`shared/include/dso_instrument_codes.hpp`. INFO, STATUS, GET_SETTINGS,
+SET_SETTINGS, SET_TRIGGER, HOLD_LOCAL_RUN, capture-job acknowledgements,
+capture-metadata and READ_SAMPLES fixed layouts are also shared; each endpoint
+retains its own field validation and command handling.
 
 ## Framing
 
@@ -23,6 +35,8 @@ Every request and response is one frame of 12–64 bytes:
 
 CRC-32/IEEE uses reflected polynomial `EDB88320`, initial value `FFFFFFFF`, final XOR `FFFFFFFF`, and covers header bytes 0–7 followed by payload bytes. It excludes the four-byte CRC field. A response echoes the request ID and uses `request opcode | 80`. Its payload starts with one status byte: `0 Ok`, `1 Invalid`, `2 Busy`, `3 Stale`, `4 Unsupported`, `5 Timeout`, `6 Cancelled`, `7 Fault`.
 
+The firmware and Studio share the version-1 opcode and status code definitions in `shared/include/dso_usb_protocol_contract.hpp`; the command table below documents those wire values.
+
 Golden request vector: `INFO`, request ID 1, empty payload is `44 53 01 01 01 00 00 00 24 7D 48 94`. The CRC is `94487D24` and is serialized least-significant byte first.
 
 All multi-byte payload integers are little-endian. Commands have one outstanding request at a time. The host must not send a new request until it receives the response to the previous one. If the response times out, retransmit the identical frame with the same ID; the device caches and replays the last response. Reusing that ID with different opcode or request bytes returns `Invalid` and does not repeat the operation. Request IDs must be nonzero and should advance for each new command.
@@ -35,8 +49,8 @@ Payload sizes below exclude the outer frame. Command response payloads always be
 
 | Opcode | Request payload | Response payload after status | Description |
 | ---: | --- | --- | --- |
-| `01 INFO` | Empty | `protocolVersion:u8`, `maxSamples:u16`, `rawBits:u8`, `maxSamplesPerRead:u8`, `reserved:u16` | Returns protocol version 1, 1024 samples, 12 raw bits, maximum chunk 22 and zero reserved bytes. |
-| `02 STATUS` | `job:u32` (`0` means current) | `uiState:u8`, `controllerFault:u8`, `work:u8`, `hostState:u8`, `job:u32`, `frameAvailable:u8`, `frameCount:u16`, `storageBusy:u8` | Host state values follow `HostCaptureState`: None 0, Pending 1, Complete 2, Cancelled 3, Fault 4. For the matching job, a timed-out capture returns status `Timeout`. |
+| `01 INFO` | Empty | `protocolVersion:u8`, `maxSamples:u16`, `rawBits:u8`, `maxSamplesPerRead:u8`, `reserved:u16` | Returns protocol version 1, 1024 samples, 12 raw bits, maximum chunk 22 and zero reserved bytes. The shared contract defines the body and status-prefixed reply offsets. |
+| `02 STATUS` | `job:u32` (`0` means current) | `uiState:u8`, `controllerFault:u8`, `work:u8`, `hostState:u8`, `job:u32`, `frameAvailable:u8`, `frameCount:u16`, `storageBusy:u8` | The shared contract defines request and reply offsets. Host state values follow `HostCaptureState`: None 0, Pending 1, Complete 2, Cancelled 3, Fault 4. For the matching job, a timed-out capture returns status `Timeout`. |
 | `03 BEGIN_FRAME` | Empty | Exactly 47 bytes of metadata | Leases an immutable, held frame. Returns `Busy` unless the controller permits export. Metadata fields are listed below. |
 | `04 READ_SAMPLES` | `token:u32`, `offset:u16`, `count:u8` | `token:u32`, `offset:u16`, `count:u8`, `samples[count]:u16[]` | Reads 1–22 raw codes from the active frame lease. Codes are 0–4095. The request range must fit the frame. |
 | `05 END_FRAME` | `token:u32` | Empty | Releases only the matching export lease. |
@@ -49,7 +63,9 @@ Payload sizes below exclude the outer frame. Command response payloads always be
 | `0C SET_TRIGGER` | `revision:u16`, `edge:u8`, `level:u16`, `position:u16` | Settings snapshot on success | Applies edge, level and position together. Values and guards match the current settings fields below. |
 | `0D HOLD_LOCAL_RUN` | `revision:u16` | Settings snapshot on success | Explicitly stops local continuous Auto/Normal RUN. The panel owns restarting RUN. |
 
-The complete `BEGIN_FRAME` response payload is 48 bytes including status:
+The complete `BEGIN_FRAME` response payload is 48 bytes including status.
+Shared body offsets and extended response lengths are defined in
+`shared/include/dso_usb_protocol_contract.hpp` and used by both encoder and decoder.
 
 | Payload offset | Size | Field |
 | ---: | ---: | --- |
@@ -70,7 +86,7 @@ The complete `BEGIN_FRAME` response payload is 48 bytes including status:
 | 43 | 1 | Coupling: Unknown 0, DC 1, AC 2, Ground 3 |
 | 44 | 1 | Trigger mode: Normal 0, Auto 1, Single 2 |
 | 45 | 1 | Trigger edge: Rising 0, Falling 1 |
-| 46 | 1 | Flags: bits 0–2 reserved and zero; bit 3 edge triggered |
+| 46 | 1 | Capture flags from `shared/include/dso_instrument_codes.hpp`: bits 0–2 and 4–7 reserved and zero; bit 3 edge triggered |
 | 47 | 1 | Reserved, zero |
 
 BEGIN_FRAME_EXTENDED appends the following fields to the same response
@@ -115,9 +131,21 @@ Offsets here exclude the status byte.
 | 16 | 4 | Selected timer clock in Hz |
 | 20 | 4 | Selected timer divider |
 | 24 | 1 | Coupling. Unknown 0, DC 1, AC 2, ground 3. |
-| 25 | 1 | Catalogue ID. ID 1 is the classic 10/20/50 µs/div sequence across successive decades. |
+| 25 | 1 | Catalogue ID. `ClassicCatalogueId` (1) identifies the classic 10/20/50 µs/div sequence across successive decades. |
 | 26 | 2 | Settings revision, compared by equality within the session |
 | 28 | 4 | Nominal timebase in µs/div |
+
+The canonical writable-capability and readiness flag values are in
+`shared/include/dso_usb_protocol_contract.hpp`; Studio keeps the
+`dso::protocol::settings_writable` and `dso::protocol::settings_flags` names as
+aliases. Capture metadata flags remain a distinct field with different meanings.
+The shared `settings_body` constants name the 32-byte body offsets and the
+33-byte reply size, including the leading status byte.
+The permitted trigger-position range is defined in
+`shared/include/dso_settings_contract.hpp`. The ordered classic timebase values
+and their catalogue count are defined in
+`shared/include/dso_timebase_contract.hpp`; firmware and Studio consume both
+shared contracts.
 
 The timer clock and divider can both be zero while the selected plan is
 unavailable. The settings apply to the next acquisition. Held

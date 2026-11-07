@@ -1,12 +1,16 @@
 #ifndef DSO_SCOPE_SCREEN_HPP
 #define DSO_SCOPE_SCREEN_HPP
 
-#include "dso_display.hpp"
-#include "dso_scaling.hpp"
+#include "dso_render_types.hpp"
+#include "dso_screen_scene.hpp"
+#include "dso_projection_limits.hpp"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace dso {
+
+class Ili9341Display;
 
 inline constexpr std::uint16_t ScopePlotX{28U};
 inline constexpr std::uint16_t ScopePlotY{34U};
@@ -21,53 +25,6 @@ inline constexpr std::uint16_t ScopePixelsPerHorizontalDiv{28U};
 inline constexpr std::uint16_t ScopePixelsPerVerticalDiv{22U};
 static_assert(WaveformColumnCapacity >= ScopePlotWidth,
               "Product waveform capacity must span the full scope plot");
-
-enum class ScreenHighlight : std::uint8_t { None, Timebase, Trigger, Position };
-// Bits follow status, quality, channel, timebase, trigger, sampling, record,
-// focus, hint. Conservative whole label rectangles erase shortened text.
-inline constexpr std::uint16_t ScreenTextAll{0x01ffU};
-
-// Half-open character cells, accumulated while the foreground composes labels.
-// An empty range with a dirty field means repaint its complete public band.
-struct ScreenTextRange final {
-    std::uint8_t first{}, end{};
-    void include(std::uint16_t begin, std::uint16_t finish) noexcept
-    {
-        // Every label has at most 51 visible characters; bound malformed callers
-        // before narrowing, so the cell-to-pixel conversion cannot wrap.
-        if (finish > 63U) { finish = 63U; }
-        if (begin >= finish) { return; }
-        if (end == 0U || begin < first) { first = static_cast<std::uint8_t>(begin); }
-        if (finish > end) { end = static_cast<std::uint8_t>(finish); }
-    }
-};
-static_assert(sizeof(ScreenTextRange) == 2U, "Keep exact text changes bounded");
-
-// Passive presentation snapshot. Labels/markers are copied on begin, whereas
-// waveform storage is borrowed directly to avoid a duplicate projection array.
-// epoch is a SCREEN revision, distinct from a frozen acquisition epoch: changing
-// a Held view may require repainting the same captured samples with new axes.
-// Caller keeps projection alive/immutable until Complete/Cancelled/Fault and
-// must cancel BEFORE modifying or releasing it. No hardware identity is implied.
-struct ScreenSnapshot final {
-    const WaveformProjection* waveform{};
-    std::uint32_t epoch{};
-    char status[12]{};
-    char quality[5]{}; // RAW/NOM/CAL; never silently supplied by the renderer.
-    char channel[28]{};
-    char timebase[22]{};
-    char trigger[31]{};
-    char sampling[20]{};
-    char record[52]{};
-    char focus[52]{};
-    char hint[52]{};
-    char zero_label[4]{}; // Explicit REF for raw codes or 0V for voltage axes.
-    std::int16_t zero_y{-1};    // Plot-relative coordinate; -1 hides marker.
-    std::int16_t trigger_y{-1};
-    std::int16_t trigger_x{-1};
-    ScreenHighlight highlight{ScreenHighlight::None};
-    bool warning{};
-};
 
 // Full 320x240 instrument screen using one 64-pixel scratch stripe. No target
 // framebuffer, formatting library, allocation, exceptions or virtual dispatch.
@@ -97,12 +54,20 @@ public:
     // not observe as a failed transfer. Also ends any outstanding row borrow.
     void invalidate() noexcept { cancel(); cache_valid_ = false; }
     [[nodiscard]] RenderState state() const noexcept { return state_; }
+    // Read-only borrow of the controller-composed scene. The screen owns the
+    // storage; later controller composition may replace its contents.
+    [[nodiscard]] const ScreenSnapshot& snapshot() const noexcept { return view_; }
 
 private:
     // A controller exclusively attaches to this screen. It composes directly
     // into view_ only after canceling rendering, avoiding a second snapshot.
     // Public begin still copies independent caller snapshots.
     friend class ScopeController;
+    // Reset the attached controller's view in place; the renderer owns its
+    // placement construction and transfer invalidation.
+    void reset_composed_view() noexcept;
+    [[nodiscard]] ScreenTextRange& composed_text_range(ScreenTextField field) noexcept
+    { return text_ranges_[screen_text_index(field)]; }
     [[nodiscard]] bool begin_composed(std::uint16_t dirty_text) noexcept
     { return begin_job(view_,dirty_text,false,true); }
     [[nodiscard]] bool begin_job(const ScreenSnapshot& snapshot, std::uint16_t dirty_text,
@@ -137,7 +102,7 @@ private:
     std::uint16_t tile_y_{};
     std::uint8_t tile_index_{};
     bool tile_map_ready_{}, tile_major_active_{};
-    std::array<ScreenTextRange,9U> text_ranges_{};
+    std::array<ScreenTextRange,ScreenTextFieldCount> text_ranges_{};
 };
 
 } // namespace dso

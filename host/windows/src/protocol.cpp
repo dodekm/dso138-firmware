@@ -1,38 +1,60 @@
 #include "protocol.hpp"
-
-#include <QtEndian>
+#include "dso_crc32.hpp"
+#include "dso_adc_contract.hpp"
+#include "dso_settings_contract.hpp"
+#include "dso_usb_protocol_contract.hpp"
+#include "instrument_codes.hpp"
+#include "protocol_request_payload.hpp"
+#include "wire_endian.hpp"
 
 namespace dso::protocol
 {
 namespace
 {
-constexpr int kHeaderSize = 12;
-constexpr int kMaximumPayload = 52;
+constexpr int kHeaderSize = usb_protocol_contract::HeaderBytes;
+constexpr int kMaximumPayload = usb_protocol_contract::MaximumPayloadBytes;
 constexpr int kMaximumBufferedBytes = 4096;
+namespace metadata_layout = usb_protocol_contract::frame_metadata_body;
+namespace settings_layout = usb_protocol_contract::settings_body;
+namespace settings_request_layout = usb_protocol_contract::settings_request;
+// Response lengths include their leading status byte; extension offsets are
+// absolute offsets within that complete response payload.
+constexpr int kBaseMetadataPayloadSize = metadata_layout::BaseResponseBytes;
+constexpr int kExtendedMetadataPayloadSize = metadata_layout::ExtendedResponseBytes;
+constexpr int kSettingsPayloadSize = settings_layout::ResponseBytes;
+constexpr char kMagicBytes[]{static_cast<char>(usb_protocol_contract::MagicFirst),
+                             static_cast<char>(usb_protocol_contract::MagicSecond)};
 
-quint16 read16(const char *bytes)
+bool failWithError(QString *error, const QString &message)
 {
-    return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(bytes));
+    if (error)
+    {
+        *error = message;
+    }
+    return false;
 }
 
-quint32 read32(const char *bytes)
+void clearError(QString *error)
 {
-    return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(bytes));
+    if (error)
+    {
+        error->clear();
+    }
 }
+
+QByteArray makeRevisionPayload(std::uint8_t payloadBytes, quint16 revision)
+{
+    QByteArray payload(static_cast<int>(payloadBytes), '\0');
+    wire_detail::write16(payload.data() + settings_request_layout::RevisionOffset, revision);
+    return payload;
+}
+
 } // namespace
 
 quint32 crc32(const QByteArray &bytes)
 {
-    quint32 crc = 0xffffffffU;
-    for (unsigned char byte : bytes)
-    {
-        crc ^= byte;
-        for (int bit = 0; bit < 8; ++bit)
-        {
-            crc = (crc >> 1U) ^ ((crc & 1U) != 0 ? 0xedb88320U : 0U);
-        }
-    }
-    return crc ^ 0xffffffffU;
+    return checksum::crc32_ieee(
+        reinterpret_cast<const std::uint8_t *>(bytes.constData()), bytes.size());
 }
 
 QByteArray encode(quint8 opcode, quint16 requestId, const QByteArray &payload)
@@ -43,18 +65,70 @@ QByteArray encode(quint8 opcode, quint16 requestId, const QByteArray &payload)
     }
 
     QByteArray frame(kHeaderSize, '\0');
-    frame[0] = 0x44;
-    frame[1] = 0x53;
-    frame[2] = 1;
-    frame[3] = char(opcode);
-    qToLittleEndian(requestId, reinterpret_cast<uchar *>(frame.data() + 4));
-    qToLittleEndian<quint16>(quint16(payload.size()), reinterpret_cast<uchar *>(frame.data() + 6));
+    frame[usb_protocol_contract::MagicFirstOffset] = char(usb_protocol_contract::MagicFirst);
+    frame[usb_protocol_contract::MagicSecondOffset] = char(usb_protocol_contract::MagicSecond);
+    frame[usb_protocol_contract::VersionOffset] = char(ProtocolVersion);
+    frame[usb_protocol_contract::OpcodeOffset] = char(opcode);
+    wire_detail::write16(frame.data() + usb_protocol_contract::RequestIdOffset, requestId);
+    wire_detail::write16(frame.data() + usb_protocol_contract::PayloadSizeOffset,
+                         quint16(payload.size()));
     frame.append(payload);
 
-    const QByteArray crcInput = frame.left(8) + frame.mid(kHeaderSize);
-    qToLittleEndian(crc32(crcInput), reinterpret_cast<uchar *>(frame.data() + 8));
+    const QByteArray crcInput = frame.left(usb_protocol_contract::CrcHeaderBytes) +
+                                frame.mid(usb_protocol_contract::PayloadOffset);
+    wire_detail::write32(frame.data() + usb_protocol_contract::CrcOffset, crc32(crcInput));
     return frame;
 }
+
+namespace detail
+{
+
+QByteArray encodeU32Payload(quint32 value)
+{
+    QByteArray payload(sizeof(value), '\0');
+    wire_detail::write32(payload.data(), value);
+    return payload;
+}
+
+QByteArray encodeSetSettingsPayload(quint16 revision, quint8 timebaseIndex,
+                                    quint8 triggerMode)
+{
+    namespace layout = settings_request_layout::set_settings;
+    auto payload = makeRevisionPayload(layout::PayloadBytes, revision);
+    payload[layout::TimebaseIndexOffset] = char(timebaseIndex);
+    payload[layout::TriggerModeOffset] = char(triggerMode);
+    return payload;
+}
+
+QByteArray encodeSetTriggerPayload(quint16 revision, quint8 edge,
+                                   quint16 level, quint16 positionPermille)
+{
+    namespace layout = settings_request_layout::set_trigger;
+    auto payload = makeRevisionPayload(layout::PayloadBytes, revision);
+    payload[layout::EdgeOffset] = char(edge);
+    wire_detail::write16(payload.data() + layout::LevelOffset, level);
+    wire_detail::write16(payload.data() + layout::PositionOffset, positionPermille);
+    return payload;
+}
+
+QByteArray encodeHoldLocalRunPayload(quint16 revision)
+{
+    return makeRevisionPayload(settings_request_layout::hold_local_run::PayloadBytes,
+                               revision);
+}
+
+QByteArray encodeReadSamplesPayload(quint32 exportToken, quint16 sampleOffset,
+                                    quint8 sampleCount)
+{
+    namespace layout = usb_protocol_contract::read_samples;
+    QByteArray payload(layout::RequestBytes, '\0');
+    wire_detail::write32(payload.data() + layout::RequestTokenOffset, exportToken);
+    wire_detail::write16(payload.data() + layout::RequestSampleOffset, sampleOffset);
+    payload[layout::RequestCountOffset] = char(sampleCount);
+    return payload;
+}
+
+} // namespace detail
 
 void Decoder::append(const QByteArray &bytes)
 {
@@ -80,7 +154,8 @@ std::optional<Reply> Decoder::take(quint16 requestId, quint8 responseOpcode)
 {
     for (;;)
     {
-        const int magic = buffer_.indexOf(QByteArray::fromHex("4453"));
+        const int magic = buffer_.indexOf(QByteArray::fromRawData(
+            kMagicBytes, usb_protocol_contract::MagicBytes));
         if (magic < 0)
         {
             if (buffer_.size() > 1)
@@ -98,8 +173,10 @@ std::optional<Reply> Decoder::take(quint16 requestId, quint8 responseOpcode)
             return {};
         }
 
-        const int payloadSize = read16(buffer_.constData() + 6);
-        if (quint8(buffer_[2]) != 1 || payloadSize > kMaximumPayload)
+        const int payloadSize = wire_detail::read16(
+            buffer_.constData() + usb_protocol_contract::PayloadSizeOffset);
+        if (quint8(buffer_[usb_protocol_contract::VersionOffset]) != ProtocolVersion ||
+            payloadSize > kMaximumPayload)
         {
             buffer_.remove(0, 1);
             continue;
@@ -111,15 +188,18 @@ std::optional<Reply> Decoder::take(quint16 requestId, quint8 responseOpcode)
         }
 
         const QByteArray frame = buffer_.left(frameSize);
-        const QByteArray crcInput = frame.left(8) + frame.mid(kHeaderSize);
-        if (crc32(crcInput) != read32(frame.constData() + 8))
+        const QByteArray crcInput = frame.left(usb_protocol_contract::CrcHeaderBytes) +
+                                    frame.mid(usb_protocol_contract::PayloadOffset);
+        if (crc32(crcInput) != wire_detail::read32(
+                frame.constData() + usb_protocol_contract::CrcOffset))
         {
             buffer_.remove(0, 1);
             continue;
         }
 
-        const quint16 frameId = read16(frame.constData() + 4);
-        const quint8 opcode = quint8(frame[3]);
+        const quint16 frameId = wire_detail::read16(
+            frame.constData() + usb_protocol_contract::RequestIdOffset);
+        const quint8 opcode = quint8(frame[usb_protocol_contract::OpcodeOffset]);
         if (frameId != requestId || opcode != responseOpcode)
         {
             buffer_.remove(0, frameSize);
@@ -131,13 +211,14 @@ std::optional<Reply> Decoder::take(quint16 requestId, quint8 responseOpcode)
             continue;
         }
 
-        const quint8 status = quint8(frame[kHeaderSize]);
+        const quint8 status = quint8(frame[usb_protocol_contract::PayloadOffset]);
         if (status > quint8(Status::Fault))
         {
             buffer_.remove(0, frameSize);
             continue;
         }
-        Reply reply{opcode, frameId, Status(status), frame.mid(kHeaderSize)};
+        Reply reply{opcode, frameId, Status(status),
+                    frame.mid(usb_protocol_contract::PayloadOffset)};
         buffer_.remove(0, frameSize);
         return reply;
     }
@@ -145,134 +226,132 @@ std::optional<Reply> Decoder::take(quint16 requestId, quint8 responseOpcode)
 
 bool decodeMetadata(const QByteArray &payload, Metadata &metadata, QString *error)
 {
-    const auto fail = [error](const QString &message) {
-        if (error)
-        {
-            *error = message;
-        }
-        return false;
-    };
-    if (payload.size() != 48 || quint8(payload[0]) != quint8(Status::Ok))
+    if (payload.size() != kBaseMetadataPayloadSize || quint8(payload[0]) != quint8(Status::Ok))
     {
-        return fail(QStringLiteral("BEGIN_FRAME response length or status is invalid"));
+        return failWithError(error, QStringLiteral("BEGIN_FRAME response length or status is invalid"));
     }
 
-    const char *data = payload.constData() + 1;
-    metadata.token = read32(data);
-    metadata.count = read16(data + 4);
-    metadata.pretrigger = read16(data + 6);
-    metadata.timerHz = read32(data + 8);
-    metadata.divider = read32(data + 12);
-    metadata.acquisitionEpoch = read32(data + 16);
-    metadata.triggerSequence = read32(data + 20);
-    metadata.physicalGeneration = read32(data + 24);
-    metadata.microvoltsPerDivision = read32(data + 28);
-    metadata.zeroCodeQ16 = qint32(read32(data + 32));
-    metadata.gainQ16 = read32(data + 36);
-    metadata.gainShift = quint8(data[40]);
-    metadata.calibrationKind = quint8(data[41]);
-    metadata.coupling = quint8(data[42]);
-    metadata.triggerMode = quint8(data[43]);
-    metadata.triggerEdge = quint8(data[44]);
-    metadata.flags = quint8(data[45]);
+    const char *data = payload.constData() + metadata_layout::BodyInResponseOffset;
+    metadata.token = wire_detail::read32(data + metadata_layout::TokenOffset);
+    metadata.count = wire_detail::read16(data + metadata_layout::SampleCountOffset);
+    metadata.pretrigger = wire_detail::read16(data + metadata_layout::PretriggerOffset);
+    metadata.timerHz = wire_detail::read32(data + metadata_layout::TimerHzOffset);
+    metadata.divider = wire_detail::read32(data + metadata_layout::TimerDividerOffset);
+    metadata.acquisitionEpoch = wire_detail::read32(data + metadata_layout::AcquisitionEpochOffset);
+    metadata.triggerSequence = wire_detail::read32(data + metadata_layout::TriggerSequenceOffset);
+    metadata.physicalGeneration = wire_detail::read32(data + metadata_layout::PhysicalGenerationOffset);
+    metadata.microvoltsPerDivision =
+        wire_detail::read32(data + metadata_layout::MicrovoltsPerDivisionOffset);
+    metadata.zeroCodeQ16 = qint32(wire_detail::read32(data + metadata_layout::ZeroCodeQ16Offset));
+    metadata.gainQ16 = wire_detail::read32(data + metadata_layout::GainQ16Offset);
+    metadata.gainShift = quint8(data[metadata_layout::GainShiftOffset]);
+    metadata.calibrationKind = quint8(data[metadata_layout::CalibrationKindOffset]);
+    metadata.coupling = quint8(data[metadata_layout::CouplingOffset]);
+    metadata.triggerMode = quint8(data[metadata_layout::TriggerModeOffset]);
+    metadata.triggerEdge = quint8(data[metadata_layout::TriggerEdgeOffset]);
+    metadata.flags = quint8(data[metadata_layout::FlagsOffset]);
 
-    if (quint8(data[46]) != 0 || metadata.token == 0 || metadata.count == 0 ||
-        metadata.count > 1024 || metadata.pretrigger >= metadata.count || metadata.timerHz == 0 ||
-        metadata.divider == 0 || metadata.calibrationKind > 2 || metadata.coupling > 3 ||
-        metadata.triggerMode > 2 || metadata.triggerEdge > 1 || (metadata.flags & 0xf7U) != 0)
+    if (quint8(data[metadata_layout::ReservedOffset]) != 0 || metadata.token == 0 || metadata.count == 0 ||
+        metadata.count > CaptureCapacity || metadata.pretrigger >= metadata.count || metadata.timerHz == 0 ||
+        metadata.divider == 0 ||
+        !instrument_code::code_is_in_range(
+            metadata.calibrationKind, instrument_code::CalibrationKind::Unavailable,
+            instrument_code::CalibrationKind::Measured) ||
+        !instrument_code::code_is_in_range(
+            metadata.coupling, instrument_code::InputCoupling::Unknown,
+            instrument_code::InputCoupling::Ground) ||
+        !instrument_code::code_is_in_range(
+            metadata.triggerMode, instrument_code::TriggerMode::Normal,
+            instrument_code::TriggerMode::Single) ||
+        !instrument_code::code_is_in_range(
+            metadata.triggerEdge, instrument_code::TriggerEdge::Rising,
+            instrument_code::TriggerEdge::Falling) ||
+        (metadata.flags & instrument_code::capture_flags::ReservedMask) != 0)
     {
-        return fail(QStringLiteral("BEGIN_FRAME metadata is outside protocol bounds"));
+        return failWithError(error, QStringLiteral("BEGIN_FRAME metadata is outside protocol bounds"));
     }
-    if (error)
-    {
-        error->clear();
-    }
+    clearError(error);
     return true;
 }
 
 bool decodeExtendedMetadata(const QByteArray &payload, Metadata &metadata, QString *error)
 {
-    const auto fail = [error](const QString &message) {
-        if (error)
-        {
-            *error = message;
-        }
-        return false;
-    };
-    if (payload.size() != 52 || quint8(payload[0]) != quint8(Status::Ok))
+    if (payload.size() != kExtendedMetadataPayloadSize || quint8(payload[0]) != quint8(Status::Ok))
     {
-        return fail(QStringLiteral("BEGIN_FRAME_EXTENDED response length or status is invalid"));
+        return failWithError(error, QStringLiteral("BEGIN_FRAME_EXTENDED response length or status is invalid"));
     }
-    if (!decodeMetadata(payload.left(48), metadata, error))
+    if (!decodeMetadata(payload.left(kBaseMetadataPayloadSize), metadata, error))
     {
         return false;
     }
-    metadata.timebaseIndex = quint8(payload[48]);
-    metadata.triggerLevel = read16(payload.constData() + 49);
+    metadata.timebaseIndex = quint8(payload[metadata_layout::ExtendedTimebaseIndexResponseOffset]);
+    metadata.triggerLevel = wire_detail::read16(
+        payload.constData() + metadata_layout::ExtendedTriggerLevelResponseOffset);
     metadata.extendedSettingsValid = true;
-    if (metadata.triggerLevel > 4095 || quint8(payload[51]) != 0)
+    if (metadata.triggerLevel > adc_contract::MaximumCode ||
+        quint8(payload[metadata_layout::ExtendedReservedResponseOffset]) != 0)
     {
         metadata.extendedSettingsValid = false;
-        return fail(QStringLiteral("BEGIN_FRAME_EXTENDED fields are outside protocol bounds"));
+        return failWithError(error, QStringLiteral("BEGIN_FRAME_EXTENDED fields are outside protocol bounds"));
     }
-    if (error)
-    {
-        error->clear();
-    }
+    clearError(error);
     return true;
 }
 
 bool decodeSettings(const QByteArray &payload, Settings &settings, QString *error)
 {
-    const auto fail = [error](const QString &message) {
-        if (error)
-        {
-            *error = message;
-        }
-        return false;
-    };
     // The wire reply contains the ordinary status byte followed by the fixed
     // 32-byte GET_SETTINGS body.
-    if (payload.size() != 33 || quint8(payload[0]) != quint8(Status::Ok))
+    if (payload.size() != kSettingsPayloadSize || quint8(payload[0]) != quint8(Status::Ok))
     {
-        return fail(QStringLiteral("GET_SETTINGS response length or status is invalid"));
+        return failWithError(error, QStringLiteral("GET_SETTINGS response length or status is invalid"));
     }
-    const char *data = payload.constData() + 1;
-    if (quint8(data[0]) != 1)
+    const char *data = payload.constData() + settings_layout::BodyInResponseOffset;
+    if (quint8(data[settings_layout::SchemaOffset]) != 1)
     {
-        return fail(QStringLiteral("GET_SETTINGS schema is unsupported"));
+        return failWithError(error, QStringLiteral("GET_SETTINGS schema is unsupported"));
     }
-    settings.writableMask = quint8(data[1]);
-    settings.uiState = quint8(data[2]);
-    settings.flags = quint8(data[3]);
-    settings.timebaseIndex = quint8(data[4]);
-    settings.catalogueCount = quint8(data[5]);
-    settings.triggerMode = quint8(data[6]);
-    settings.triggerEdge = quint8(data[7]);
-    settings.triggerLevel = read16(data + 8);
-    settings.triggerPositionPermille = read16(data + 10);
-    settings.microvoltsPerDivision = read32(data + 12);
-    settings.timerHz = read32(data + 16);
-    settings.divider = read32(data + 20);
-    settings.coupling = quint8(data[24]);
-    settings.catalogueId = quint8(data[25]);
-    settings.revision = read16(data + 26);
-    settings.timebaseMicrosecondsPerDivision = read32(data + 28);
+    settings.writableMask = quint8(data[settings_layout::WritableMaskOffset]);
+    settings.uiState = quint8(data[settings_layout::UiStateOffset]);
+    settings.flags = quint8(data[settings_layout::FlagsOffset]);
+    settings.timebaseIndex = quint8(data[settings_layout::TimebaseIndexOffset]);
+    settings.catalogueCount = quint8(data[settings_layout::CatalogueCountOffset]);
+    settings.triggerMode = quint8(data[settings_layout::TriggerModeOffset]);
+    settings.triggerEdge = quint8(data[settings_layout::TriggerEdgeOffset]);
+    settings.triggerLevel = wire_detail::read16(data + settings_layout::TriggerLevelOffset);
+    settings.triggerPositionPermille =
+        wire_detail::read16(data + settings_layout::TriggerPositionOffset);
+    settings.microvoltsPerDivision =
+        wire_detail::read32(data + settings_layout::MicrovoltsPerDivisionOffset);
+    settings.timerHz = wire_detail::read32(data + settings_layout::TimerHzOffset);
+    settings.divider = wire_detail::read32(data + settings_layout::TimerDividerOffset);
+    settings.coupling = quint8(data[settings_layout::CouplingOffset]);
+    settings.catalogueId = quint8(data[settings_layout::CatalogueIdOffset]);
+    settings.revision = wire_detail::read16(data + settings_layout::RevisionOffset);
+    settings.timebaseMicrosecondsPerDivision =
+        wire_detail::read32(data + settings_layout::TimebaseMicrosecondsPerDivisionOffset);
 
-    if ((settings.writableMask & 0xc0U) != 0 || settings.uiState > 6 ||
-        (settings.flags & 0xe0U) != 0 || settings.catalogueCount == 0 ||
-        settings.timebaseIndex >= settings.catalogueCount || settings.triggerMode > 2 ||
-        settings.triggerEdge > 1 || settings.triggerLevel > 4095 ||
-        settings.triggerPositionPermille > 1000 || settings.coupling > 3 ||
+    if ((settings.writableMask & settings_writable::ReservedMask) != 0 ||
+        settings.uiState > instrument_code::code(instrument_code::UiState::Fault) ||
+        (settings.flags & settings_flags::ReservedMask) != 0 || settings.catalogueCount == 0 ||
+        settings.timebaseIndex >= settings.catalogueCount ||
+        !instrument_code::code_is_in_range(
+            settings.triggerMode, instrument_code::TriggerMode::Normal,
+            instrument_code::TriggerMode::Single) ||
+        !instrument_code::code_is_in_range(
+            settings.triggerEdge, instrument_code::TriggerEdge::Rising,
+            instrument_code::TriggerEdge::Falling) ||
+        settings.triggerLevel > adc_contract::MaximumCode ||
+        settings.triggerPositionPermille > settings_contract::TriggerPositionPermilleMaximum ||
+        !instrument_code::code_is_in_range(
+            settings.coupling, instrument_code::InputCoupling::Unknown,
+            instrument_code::InputCoupling::Ground) ||
         ((settings.timerHz == 0) != (settings.divider == 0)) ||
         settings.timebaseMicrosecondsPerDivision == 0)
     {
-        return fail(QStringLiteral("GET_SETTINGS fields are outside protocol bounds"));
+        return failWithError(error, QStringLiteral("GET_SETTINGS fields are outside protocol bounds"));
     }
-    if (error)
-    {
-        error->clear();
-    }
+    clearError(error);
     return true;
 }
 } // namespace dso::protocol

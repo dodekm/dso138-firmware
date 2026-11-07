@@ -1,5 +1,6 @@
 #include "dso_stm32_analog_power.hpp"
 #include "dso_stm32_shared_guard.hpp"
+#include "dso_u32_counter.hpp"
 #include "main.h"
 
 namespace dso {
@@ -16,7 +17,6 @@ constexpr std::uint32_t Period{4095U};
 constexpr std::uint32_t Enables{TIM_CCER_CC3E | TIM_CCER_CC4E};
 constexpr std::uint32_t PwmModes{TIM_OCMODE_PWM1 | (TIM_OCMODE_PWM1 << 8U) |
     TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE};
-constexpr std::uint32_t HalfRange{0x80000000U};
 constexpr unsigned ProgressIterations{4096U};
 constexpr std::uint32_t ProgressDeadlineCycles{72000U};
 
@@ -184,7 +184,8 @@ bool progressing_counter() noexcept
         const auto current = static_cast<std::uint32_t>(TIM4->CNT);
         const auto elapsed = static_cast<std::uint32_t>(DWT->CYCCNT - start_cycles);
         if (current > Period || elapsed < previous_elapsed ||
-            elapsed >= HalfRange || elapsed >= ProgressDeadlineCycles) { return false; }
+            elapsed >= counter_contract::U32HalfRange ||
+            elapsed >= ProgressDeadlineCycles) { return false; }
         // Under sole timer ownership, no CNT writes occur while running.
         // A decrease therefore observes a natural overflow/update, proving
         // that ARR/CCR preloads have crossed a hardware update boundary even

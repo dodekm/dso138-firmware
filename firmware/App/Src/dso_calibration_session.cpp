@@ -1,19 +1,8 @@
 #include "dso_calibration_session.hpp"
+#include "dso_front_panel.hpp"
+#include "dso_physical_settings.hpp"
 
 namespace dso {
-namespace {
-bool same_physical(const PhysicalSettings& a, const PhysicalSettings& b) noexcept
-{
-    return a.generation == b.generation && a.microvolts_per_div == b.microvolts_per_div &&
-        a.coupling == b.coupling;
-}
-bool valid_physical(const PhysicalSettings& physical) noexcept
-{
-    // Reuse the calibration module's authoritative range/coupling validation.
-    const CalibrationPoint probe{physical, 1U, 2048U * 65536U, 0, 64U, 2048U, 2048U, 0U};
-    return calibration_point_valid(probe);
-}
-}
 
 bool CalibrationSession::active() const noexcept
 {
@@ -32,7 +21,7 @@ bool CalibrationSession::begin(const PhysicalSettings& physical, CalibrationBank
     status_ = CalibrationSessionStatus::Disabled;
     if (bank.board_identity() == 0U) { return false; }
     status_ = CalibrationSessionStatus::Physical;
-    if (!valid_physical(physical)) { return false; }
+    if (!calibration_physical_valid(physical)) { return false; }
     first_.physical = physical;
     board_identity_ = bank.board_identity();
     state_ = CalibrationSessionState::FirstReference;
@@ -44,11 +33,12 @@ bool CalibrationSession::accept(const CalibrationPoint& point, std::uint32_t tol
 {
     status_ = CalibrationSessionStatus::State;
     if (!active() || state_ == CalibrationSessionState::Verified) { return false; }
-    if (!same_physical(first_.physical, point.physical)) {
+    if (!same_physical_settings(first_.physical, point.physical)) {
         abort(); status_ = CalibrationSessionStatus::Physical; return false;
     }
     status_ = CalibrationSessionStatus::InvalidPoint;
-    if (!calibration_point_valid(point) || tolerance_microvolts > 1000000U) { return false; }
+    if (!calibration_point_valid(point) ||
+        tolerance_microvolts > MaximumCalibrationToleranceMicrovolts) { return false; }
     if (state_ == CalibrationSessionState::FirstReference) {
         first_ = point;
         state_ = CalibrationSessionState::SecondReference;
@@ -76,7 +66,7 @@ bool CalibrationSession::install(const PhysicalSettings& physical, CalibrationBa
 {
     status_ = CalibrationSessionStatus::State;
     if (state_ != CalibrationSessionState::Verified) { return false; }
-    if (!same_physical(first_.physical, physical)) {
+    if (!same_physical_settings(first_.physical, physical)) {
         abort(); status_ = CalibrationSessionStatus::Physical; return false;
     }
     if (bank.board_identity() != board_identity_ || bank.board_identity() == 0U || !bank.install(fit_)) {
@@ -103,7 +93,7 @@ void CalibrationSession::physical_update(const PanelUpdate& update) noexcept
 {
     if ((active() || state_ == CalibrationSessionState::Installed) &&
         (!update.ready || update.invalidate_acquisition || update.configuration_changed ||
-         !same_physical(first_.physical, update.settings))) {
+         !same_physical_settings(first_.physical, update.settings))) {
         abort();
         status_ = CalibrationSessionStatus::Physical;
     }

@@ -1,4 +1,8 @@
 #include "dso_measurements.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_timebase.hpp"
 #include "dso_u64_division.hpp"
 #include "dso_voltage_math.hpp"
 #include "dso_fixed_ratio.hpp"
@@ -67,13 +71,12 @@ bool valid_begin(std::uint16_t count, const FrameMetadata& metadata,
 {
     return count != 0U && count <= CaptureCapacity && metadata.capture.length == count &&
         metadata.capture.pretrigger < count && metadata.acquisition_epoch != 0U &&
-        metadata.physical.generation != 0U && metadata.physical.microvolts_per_div >= 10000U &&
-        metadata.physical.microvolts_per_div <= 5000000U &&
+        metadata.physical.generation != 0U &&
+        metadata.physical.microvolts_per_div >= MinimumPhysicalMicrovoltsPerDivision &&
+        metadata.physical.microvolts_per_div <= MaximumPhysicalMicrovoltsPerDivision &&
         (metadata.physical.coupling == InputCoupling::Ac || metadata.physical.coupling == InputCoupling::Dc ||
          metadata.physical.coupling == InputCoupling::Ground) &&
-        metadata.timing.timer_hz >= 1000000U && metadata.timing.timer_hz <= 72000000U &&
-        metadata.timing.divider != 0U &&
-        (std::uint64_t{metadata.timing.prescaler} + 1U) * (std::uint64_t{metadata.timing.period} + 1U) == metadata.timing.divider &&
+        valid_record_timing(metadata.timing) &&
         (calibration.kind == CalibrationKind::Unavailable || calibration_valid(calibration)) &&
         config.minimum_peak_to_peak_codes != 0U && config.minimum_peak_to_peak_codes <= AdcMax &&
         config.minimum_hysteresis_codes != 0U && config.minimum_hysteresis_codes <= AdcMax / 2U &&

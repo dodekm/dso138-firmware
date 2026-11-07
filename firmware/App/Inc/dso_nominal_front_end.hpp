@@ -1,7 +1,8 @@
 #ifndef DSO_NOMINAL_FRONT_END_HPP
 #define DSO_NOMINAL_FRONT_END_HPP
 
-#include "dso_scaling.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_voltage_calibration.hpp"
 #include <cstdint>
 
 namespace dso {

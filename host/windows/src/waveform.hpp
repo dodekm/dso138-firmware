@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QPoint>
+#include <QString>
 #include <QWidget>
 #include <memory>
 
@@ -8,7 +10,10 @@ namespace dso
 struct Capture;
 }
 
+class QKeyEvent;
 class QMouseEvent;
+class QPaintEvent;
+class QResizeEvent;
 class QWheelEvent;
 
 namespace dso

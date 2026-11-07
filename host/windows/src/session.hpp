@@ -1,45 +1,36 @@
 #pragma once
 
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QObject>
-#include <QSerialPort>
+#include <QString>
 #include <QTimer>
-#include <functional>
+#include <QtGlobal>
 #include <memory>
+#include <optional>
+#include <variant>
 
-#include "capture.hpp"
+#include "byte_transport.hpp"
+#include "capture_model.hpp"
 #include "protocol.hpp"
 
 namespace dso
 {
 
-// Minimal injectable byte transport. Tests can provide a deterministic in-memory
-// implementation; the production adapter is a single explicitly selected COM port.
-class ByteTransport : public QObject
-{
-    Q_OBJECT
-  public:
-    using QObject::QObject;
-    virtual bool open(const QString &portName) = 0;
-    virtual void close() = 0;
-    virtual bool isOpen() const = 0;
-    virtual QByteArray readAll() = 0;
-    virtual qint64 write(const QByteArray &bytes) = 0;
-    virtual QString errorString() const
-    {
-        return QStringLiteral("Transport open failed");
-    }
-
-  signals:
-    void readyRead();
-    void lost(QString reason);
-};
-
+// Event-driven protocol coordinator. It owns one transport and advances the
+// handshake, settings and capture workflows from transport signals and timers.
+// Keep Session on its construction thread: its value-member QTimers do not
+// migrate with the QObject, and transport calls are synchronous on this thread.
 class Session final : public QObject
 {
     Q_OBJECT
   public:
+    // Convenience for clients linking the production serial adapter. The
+    // session core itself depends only on the injected-transport overload.
     explicit Session(QObject *parent = nullptr);
+    // The composition root supplies the production or test transport; Session
+    // owns it and remains independent of any concrete I/O backend.
+    // A null transport is tolerated; connectPort() reports it and stays idle.
     explicit Session(std::unique_ptr<ByteTransport> transport, QObject *parent = nullptr);
 
     bool connected() const noexcept
@@ -50,8 +41,11 @@ class Session final : public QObject
     {
         return busy_;
     }
-    bool liveCaptureActive() const noexcept { return liveCapture_; }
-    bool repeatedCaptureActive() const noexcept { return seriesTotal_ > 1; }
+    bool liveCaptureActive() const noexcept { return captureRun_.live; }
+    // Series context stays latched through the final frameReady callback so
+    // that record can be labeled after the session returns to idle. Use busy()
+    // to query whether an operation is currently active.
+    bool repeatedCaptureActive() const noexcept { return captureRun_.total > 1; }
     bool cancellable() const noexcept;
 
   public slots:
@@ -106,32 +100,95 @@ class Session final : public QObject
         SeriesGap
     };
 
+    // At most one command is outstanding. Retries reuse this exact encoded
+    // frame and ID; retry exhaustion closes the connection to avoid ambiguity.
     struct Exchange
     {
         bool pending{};
         quint16 id{};
-        quint8 opcode{};
+        protocol::Opcode opcode{protocol::Opcode::Info};
         QByteArray bytes;
         int retries{};
     };
     struct SettingsWrite
     {
-        quint8 opcode{};
+        protocol::Opcode opcode{protocol::Opcode::SetSettings};
+        // Kept separately to reject a deferred write after stale readback;
+        // payload already contains this same revision for the wire.
         quint16 revision{};
-        QByteArray values;
+        QByteArray payload;
+    };
+    // One of these bounded actions may wait for the current settings readback.
+    struct DeferredHeldDownload final
+    {};
+    struct DeferredLiveStart final
+    {
+        int timeoutMs{};
+    };
+    struct DeferredCaptureSeries final
+    {
+        int count{};
+        int timeoutMs{};
+        int intervalMs{};
+    };
+    struct DeferredSettingsWrite final
+    {
+        SettingsWrite write{};
+    };
+    using DeferredAction = std::variant<DeferredHeldDownload, DeferredLiveStart,
+                                        DeferredCaptureSeries, DeferredSettingsWrite>;
+    struct InstrumentState final
+    {
+        protocol::Settings settings{};
+        protocol::SettingsAvailability availability{protocol::SettingsAvailability::Unknown};
+
+        [[nodiscard]] bool supportsExtendedMetadata() const noexcept
+        {
+            return (settings.flags & protocol::settings_flags::ExtendedCapture) != 0;
+        }
+    };
+    // Bounded working record for the single active leased-frame transfer.
+    struct FrameTransferState final
+    {
+        quint32 exportToken{};
+        protocol::Metadata metadata{};
+        Capture capture{};
+        quint16 sampleOffset{};
+    };
+    // State shared by one-shot, repeated, and live capture workflows.
+    struct CaptureRunState final
+    {
+        int timeoutMs{};
+        int remaining{};
+        int total{};
+        int intervalMs{};
+        int completed{};
+        qint64 acquisitionDurationMs{-1};
+        bool live{};
+        bool trackHostInterval{};
+    };
+    // Bounds the one settings-refresh retry after a live capture is Busy.
+    struct LiveStartRetryState final
+    {
+        bool busyRetryUsed{};
+        int settingsReads{};
+        quint16 revision{};
     };
 
     void setBusy(bool busy);
-    void sendCommand(quint8 opcode, const QByteArray &payload = {});
+    void sendCommand(protocol::Opcode opcode, const QByteArray &payload = {});
     void handleReply(const protocol::Reply &reply);
     void handleInfo(const protocol::Reply &reply);
     void handleSettings(const protocol::Reply &reply);
+    void acceptInstrumentSettings(const protocol::Settings &settings);
     void handleLiveSettings(const protocol::Reply &reply);
     void handleLiveStartRetrySettings(const protocol::Reply &reply);
     void handleSettingsWrite(const protocol::Reply &reply);
     bool canSubmitSettings() const noexcept;
-    bool deferUntilSettingsRead(std::function<void()> action);
-    void submitSettingsWrite(quint8 opcode, QByteArray values = {});
+    bool canWriteSettings(quint8 requiredWritableMask) const noexcept;
+    bool deferUntilSettingsRead(DeferredAction action);
+    void runDeferredAction(const DeferredAction &action);
+    void submitSettingsWrite(protocol::Opcode opcode, QByteArray payload);
     void startSettingsWrite(const SettingsWrite &write);
     void requestSettings();
     void scheduleSettingsPoll();
@@ -141,6 +198,7 @@ class Session final : public QObject
     void handleEnd(const protocol::Reply &reply);
     void handleCancel(const protocol::Reply &reply);
 
+    void resetInstrumentSettings();
     void beginCaptureSeries(int count, int timeoutMs, int intervalMs);
     void startNextCapture();
     void pollCaptureStatus();
@@ -153,6 +211,7 @@ class Session final : public QObject
     void completeOperation(const QString &message = {});
     void failOperation(const QString &message);
     void closeTransport(const QString &reason, bool report);
+    void closeTransportEndpoint();
     void resetProtocolState();
     void armNextStatusPoll(int delayMs);
     void scheduleStateTimer(int delayMs);
@@ -171,30 +230,16 @@ class Session final : public QObject
     State state_{State::Disconnected};
     quint16 nextRequestId_{1};
     quint32 jobId_{};
-    quint32 exportToken_{};
-    protocol::Metadata metadata_{};
-    protocol::Settings instrumentSettings_{};
-    protocol::SettingsAvailability settingsAvailability_{protocol::SettingsAvailability::Unknown};
-    Capture frame_{};
-    quint16 sampleOffset_{};
-    int captureTimeoutMs_{};
-    int seriesRemaining_{};
-    int seriesTotal_{};
-    int seriesIntervalMs_{};
-    int completedCaptures_{};
-    qint64 acquisitionDurationMs_{-1};
+    FrameTransferState frameTransfer_{};
+    CaptureRunState captureRun_{};
+    InstrumentState instrument_{};
+    LiveStartRetryState liveStartRetry_{};
     bool transportOpen_{};
     bool connected_{};
     bool busy_{};
     bool cancelRequested_{};
     bool jobCompleteVerified_{};
-    bool liveCapture_{};
-    bool liveStartBusyRetryUsed_{};
-    int liveStartRetrySettingsReads_{};
-    quint16 liveStartRetryRevision_{};
-    bool trackHostInterval_{};
-    bool extendedMetadataAvailable_{};
-    std::function<void()> deferredAction_;
+    std::optional<DeferredAction> deferredAction_;
     QString pendingFailure_;
     quint64 generation_{};
 };

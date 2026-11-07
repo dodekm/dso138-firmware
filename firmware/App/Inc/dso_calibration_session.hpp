@@ -2,8 +2,11 @@
 #define DSO_CALIBRATION_SESSION_HPP
 
 #include "dso_calibration.hpp"
+#include "dso_physical_settings.hpp"
 
 namespace dso {
+
+struct PanelUpdate;
 
 enum class CalibrationSessionState : std::uint8_t {
     Idle, FirstReference, SecondReference, ValidationReference, Verified,

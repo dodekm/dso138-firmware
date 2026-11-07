@@ -1,12 +1,11 @@
 #include "dso_controls.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_u32_counter.hpp"
 
 #include <cstddef>
 
 namespace dso {
 namespace {
-
-constexpr std::uint16_t AdcMax{4095U};
-constexpr std::uint32_t HalfRange{0x80000000U};
 
 constexpr bool bands_valid(const SenseBands &bands) noexcept
 {
@@ -18,13 +17,14 @@ constexpr bool bands_valid(const SenseBands &bands) noexcept
 constexpr bool timing_valid(std::uint32_t settle,
                              std::uint32_t maxgap) noexcept
 {
-    return settle > 0U && settle < HalfRange && maxgap > 0U && maxgap < HalfRange;
+    return settle > 0U && settle < counter_contract::U32HalfRange &&
+           maxgap > 0U && maxgap < counter_contract::U32HalfRange;
 }
 
 constexpr bool poll_discontinuous(std::uint32_t elapsed,
                                    std::uint32_t maxgap) noexcept
 {
-    return elapsed >= HalfRange || elapsed > maxgap;
+    return elapsed >= counter_contract::U32HalfRange || elapsed > maxgap;
 }
 
 constexpr std::uint8_t button_bit(std::size_t index) noexcept
@@ -82,7 +82,7 @@ SwitchPosition SwitchFilter::update(std::uint16_t raw,
         return stable_;
     }
     const auto age = static_cast<std::uint32_t>(now_ms - candidate_since_);
-    if (age >= HalfRange) {
+    if (age >= counter_contract::U32HalfRange) {
         candidate_since_ = now_ms;
     } else if (age >= settle_ms_) {
         stable_ = decoded;
@@ -146,7 +146,7 @@ ButtonEvents DebouncedButtons::update(std::uint8_t pressed_mask,
             continue;
         }
         const auto age = static_cast<std::uint32_t>(now_ms - button.candidate_since);
-        if (age >= HalfRange) {
+        if (age >= counter_contract::U32HalfRange) {
             button.candidate_since = now_ms;
         } else if (age >= debounce_ms_) {
             button.stable = button.candidate;

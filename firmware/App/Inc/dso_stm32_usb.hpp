@@ -2,6 +2,7 @@
 #define DSO_STM32_USB_HPP
 
 #include "dso_usb_cdc.hpp"
+#include "dso_usb_transport.hpp"
 
 #ifndef DSO_USB_VID
 #define DSO_USB_VID 0U

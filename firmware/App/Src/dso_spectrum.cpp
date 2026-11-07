@@ -1,4 +1,9 @@
 #include "dso_spectrum.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_frame_metadata.hpp"
+#include "dso_scaling.hpp"
+#include "dso_timebase.hpp"
 #include "dso_u64_division.hpp"
 
 #include <algorithm>
@@ -15,15 +20,6 @@ constexpr std::uint16_t kLog2Q12[17] = {
     0, 358, 696, 1016, 1319, 1607, 1882, 2145,
     2396, 2637, 2869, 3092, 3307, 3514, 3715, 3908, 4096
 };
-bool valid_timing(const TimebasePlan& timing) noexcept
-{
-    if (timing.timer_hz < 1000000U || timing.timer_hz > 72000000U ||
-        timing.divider == 0U) { return false; }
-    const auto psc = static_cast<std::uint64_t>(timing.prescaler) + 1U;
-    const auto arr = static_cast<std::uint64_t>(timing.period) + 1U;
-    return psc * arr == timing.divider;
-}
-
 std::uint8_t leading_zeros(std::uint32_t value) noexcept
 {
 #if defined(__GNUC__) || defined(__clang__)
@@ -100,7 +96,7 @@ bool SpectrumAnalyzer::begin(const std::uint16_t* samples, std::uint16_t count,
     if (samples == nullptr || work == nullptr || count == 0U ||
         count > CaptureCapacity ||
         static_cast<std::uint32_t>(start) + SpectrumLength > count ||
-        capacity_words < SpectrumLength || !valid_timing(frame.timing)) {
+        capacity_words < SpectrumLength || !valid_record_timing(frame.timing)) {
         state_ = SpectrumState::Invalid;
         return false;
     }

@@ -14,6 +14,24 @@ struct TimebasePlan final {
     std::uint16_t trigger_cycles_x2;
 };
 
+// Bounds applied when a captured TimebasePlan is consumed as record metadata.
+// The 1 MHz lower bound is analysis policy; the 72 MHz upper bound matches the
+// current STM32F103 timer clock profile. The generic planner remains unrestricted
+// by these record-consumer limits.
+inline constexpr std::uint32_t MinimumRecordTimerHz{1000000U};
+inline constexpr std::uint32_t MaximumRecordTimerHz{72000000U};
+
+[[nodiscard]] constexpr bool valid_record_timing(const TimebasePlan& timing) noexcept
+{
+    if (timing.timer_hz < MinimumRecordTimerHz || timing.timer_hz > MaximumRecordTimerHz ||
+        timing.divider == 0U) {
+        return false;
+    }
+    const auto prescaler = std::uint64_t{timing.prescaler} + 1U;
+    const auto period = std::uint64_t{timing.period} + 1U;
+    return prescaler * period == timing.divider;
+}
+
 /*
  * Plan a periodic regular ADC trigger using 16-bit PSC and ARR registers.
  * The exact nominal sample rate is timer_hz / divider, a rational number.

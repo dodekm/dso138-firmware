@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Refactor firmware and Studio internals into focused modules with shared protocol and instrument contracts.
+- Fix standalone storage initialization by validating the configured full MCU UID and Flash size without relying on the software-inaccessible debug ID register.
+- Verify settings and calibration save/restore on the reference board, including standalone startup and cleanup of a synthetic test profile. See [verification results](docs/release-readiness.md#storage-identity-and-persistence-follow-up).
+
 ## Studio 2.0.2
 
 - Keep capture history rows stable while the selection menu is open and catch up after it closes.

@@ -1,15 +1,28 @@
 #ifndef DSO_UI_CONTROLLER_HPP
 #define DSO_UI_CONTROLLER_HPP
 
-#include "dso_scope_screen.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_frame_metadata.hpp"
+#include "dso_render_types.hpp"
+#include "dso_scaling.hpp"
+#include "dso_screen_scene.hpp"
 #include "dso_ui_model.hpp"
+#include "dso_instrument_codes.hpp"
 #include "dso_measurements.hpp"
 #include "dso_calibration.hpp"
 #include "dso_calibration_session.hpp"
-#include "dso_scope_storage.hpp"
+#include "dso_physical_settings.hpp"
 #include "dso_spectrum.hpp"
+#include <array>
+#include <cstdint>
 
 namespace dso {
+
+class ScopeStorage;
+class DmaAcquisition;
+class ScopeScreen;
+struct PanelUpdate;
+struct ButtonEvents;
 
 struct CalibrationSource final {
     void* context{};
@@ -33,7 +46,7 @@ struct UiControllerConfig final {
     bool acquisition_enabled{};
     bool rendering_enabled{};
     CalibrationSource calibration{};
-    ScopeStorage* storage{}; // Optional; identity zero leaves even reads disabled.
+    ScopeStorage* storage{}; // Optional, non-owning; owner outlives controller. Identity zero disables reads.
     // When supplied, this is also the sole per-arm calibration resolver. Zero
     // board identity still disables the workflow; construction grants no I/O.
     CalibrationBank* calibration_bank{};
@@ -53,7 +66,7 @@ struct UiServiceResult final {
     MeasurementStep measurement;
 };
 
-enum class HostCaptureState : std::uint8_t { None, Pending, Complete, Cancelled, Fault };
+using HostCaptureState = instrument_code_contract::HostCaptureState;
 enum class HostSettingsResult : std::uint8_t { Applied, Invalid, Busy, Stale };
 
 // One foreground owner orchestrates input -> acquire -> freeze -> bounded copy
@@ -78,13 +91,28 @@ public:
     [[nodiscard]] UiServiceResult service() noexcept;
     [[nodiscard]] const ScopeUi& ui() const noexcept { return ui_; }
     [[nodiscard]] UiControllerFault fault() const noexcept { return fault_; }
-    [[nodiscard]] UiWork work() const noexcept { return work_; }
-    [[nodiscard]] bool frame_available() const noexcept { return frame_valid_; }
-    [[nodiscard]] const FrameMetadata* frame_metadata() const noexcept { return frame_valid_ ? &frame_ : nullptr; }
-    [[nodiscard]] std::uint8_t frame_timebase_index() const noexcept { return frame_timebase_index_; }
-    [[nodiscard]] VoltageCalibration frame_calibration() const noexcept { return frozen_calibration_; }
-    [[nodiscard]] const WaveformProjection& projection() const noexcept { return projection_; }
-    [[nodiscard]] const ScreenSnapshot& scene() const noexcept { return screen_.view_; }
+    [[nodiscard]] UiWork work() const noexcept { return processing_.work; }
+    [[nodiscard]] bool frame_available() const noexcept { return retained_frame_.valid; }
+    // Null without a completed frame; copy the value to retain metadata across
+    // a later acquisition, which replaces the controller-owned record.
+    [[nodiscard]] const FrameMetadata* frame_metadata() const noexcept
+    {
+        return retained_frame_.valid ? &retained_frame_.metadata : nullptr;
+    }
+    [[nodiscard]] std::uint8_t frame_timebase_index() const noexcept
+    {
+        return retained_frame_.timebase_index;
+    }
+    [[nodiscard]] VoltageCalibration frame_calibration() const noexcept
+    {
+        return retained_frame_.calibration;
+    }
+    // Read-only derived view; contents can change during a later foreground
+    // service. The controller manages its render borrow until job completion.
+    [[nodiscard]] const WaveformProjection& projection() const noexcept { return analysis_.projection; }
+    // Read-only borrowed view into ScopeScreen's composition. Its storage
+    // follows the screen lifetime; later controller updates may replace contents.
+    [[nodiscard]] const ScreenSnapshot& scene() const noexcept;
     [[nodiscard]] ScopeTimebaseSupport timebase_support() const noexcept { return plan_.support; }
     // Returns the current selection's validated timer plan after foreground service.
     [[nodiscard]] const TimebasePlan* selected_timing() const noexcept
@@ -93,8 +121,8 @@ public:
                planned_index_ == ui_.settings().timebase_index ? &plan_.timing : nullptr;
     }
     [[nodiscard]] bool acquisition_running() const noexcept;
-    [[nodiscard]] bool storage_busy() const noexcept { return storage_phase_ != StoragePhase::Idle; }
-    [[nodiscard]] UiStorageStatus storage_status() const noexcept { return storage_status_; }
+    [[nodiscard]] bool storage_busy() const noexcept { return storage_.phase != StoragePhase::Idle; }
+    [[nodiscard]] UiStorageStatus storage_status() const noexcept { return storage_.status; }
     [[nodiscard]] UiCalibrationStatus calibration_status() const noexcept { return calibration_status_; }
     [[nodiscard]] const CalibrationSession& calibration_session() const noexcept { return calibration_session_; }
     [[nodiscard]] bool sample(std::uint16_t index, std::uint16_t& out) const noexcept;
@@ -108,7 +136,7 @@ public:
     // calibration, and samples may be borrowed for one foreground service
     // call. Retain only the token between calls.
     [[nodiscard]] std::uint32_t begin_export() noexcept;
-    [[nodiscard]] std::uint32_t active_export_token() const noexcept { return export_token_; }
+    [[nodiscard]] std::uint32_t active_export_token() const noexcept { return host_.export_token; }
     [[nodiscard]] const std::uint16_t* export_samples(std::uint32_t token) const noexcept;
     [[nodiscard]] bool end_export(std::uint32_t token) noexcept;
     // Each host job completes once. Legacy clients force Single triggering.
@@ -118,7 +146,7 @@ public:
     // USB changes the next acquisition in idle HOLD. The held record remains
     // immutable. A local button press or transport loss ends the override.
     [[nodiscard]] bool host_settings_writable() const noexcept;
-    [[nodiscard]] std::uint16_t host_settings_revision() const noexcept { return host_settings_revision_; }
+    [[nodiscard]] std::uint16_t host_settings_revision() const noexcept { return host_.settings_revision; }
     [[nodiscard]] HostSettingsResult apply_host_settings(std::uint16_t expected_revision,
         const ScopeUiSettings& settings) noexcept;
     [[nodiscard]] bool host_hold_available() const noexcept;
@@ -127,13 +155,51 @@ public:
 
 private:
     enum class StoragePhase : std::uint8_t { Idle, Opening, Saving, Reading };
+    // Single foreground-owned record of the persistence workflow and boot read.
+    struct StorageState final {
+        StoragePhase phase{StoragePhase::Idle};
+        StorageCommand command{StorageCommand::None};
+        UiStorageStatus status{UiStorageStatus::Disabled};
+        std::uint16_t copied_bytes{}; // Offset while restoring the saved calibration record.
+        bool boot_pending{true};
+        bool boot_active{};
+        bool boot_waiting_input{};
+    };
+    // UI-owned copy of the last DMA record and the settings frozen with it.
+    // valid is published only after the bounded sample copy is complete.
+    struct RetainedFrameState final {
+        FrameMetadata metadata{};
+        std::array<std::uint16_t, CaptureCapacity> samples{};
+        VoltageCalibration calibration{};
+        std::uint32_t request{};
+        std::uint8_t timebase_index{};
+        std::uint16_t copied_samples{}; // Progress of the bounded DMA-record copy.
+        bool valid{};
+    };
+    // Foreground work stage and resources held across service calls.
+    struct ProcessingState final {
+        std::uint32_t active_request{};
+        std::uint8_t active_timebase_index{};
+        UiWork work{UiWork::Idle};
+        bool pending_frame_consumption{};
+        bool spectrum_workspace_leased{};
+    };
+    // Per-frame calibration and incremental signal-analysis engines. Kept
+    // separate from ProcessingState, which tracks controller scheduling.
+    struct AnalysisWorkspace final {
+        VoltageCalibration active_calibration{};
+        WaveformProjection projection{};
+        WaveformProjector projector{};
+        SpectrumAnalyzer spectrum{};
+        MeasurementEngine measurement{};
+    };
     static bool stored_calibration(void*, std::uint16_t, std::uint8_t*, std::uint16_t) noexcept;
     static bool staged_calibration(void*, std::uint16_t, std::uint8_t*, std::uint16_t) noexcept;
     void start_storage(StorageCommand command) noexcept;
     void calibrate(const CalibrationRequest& request) noexcept;
     void service_storage() noexcept;
     void finish_storage(UiStorageStatus status) noexcept;
-    void refresh_backend() noexcept;
+    void reconcile_acquisition_readiness() noexcept;
     void cancel_consumers() noexcept;
     void invalidate_export() noexcept;
     void cancel_host_job(HostCaptureState state) noexcept;
@@ -160,43 +226,28 @@ private:
     ScopeTimebasePlan plan_{};
     std::uint8_t planned_index_{255U};
     UiControllerFault fault_{UiControllerFault::None};
-    UiWork work_{UiWork::Idle};
-    std::uint32_t active_request_{};
-    std::uint32_t frame_request_{};
-    std::uint8_t active_timebase_index_{};
-    std::uint8_t frame_timebase_index_{};
-    std::uint32_t export_token_{};
-    std::uint32_t export_generation_{};
-    std::uint32_t host_job_{};
-    std::uint32_t host_request_{};
-    HostCaptureState host_state_{HostCaptureState::None};
-    bool host_uses_selected_mode_{};
-    std::uint16_t host_settings_revision_{};
-    std::uint8_t local_buttons_held_{};
-    bool host_override_active_{};
-    ScopeUiSettings host_prior_settings_{};
+    ProcessingState processing_{};
+    // USB lease/job and settings state, including local-control arbitration.
+    struct HostControlState final {
+        std::uint32_t export_token{};
+        std::uint32_t export_generation{};
+        std::uint32_t job{};
+        std::uint32_t request{};
+        HostCaptureState capture_state{HostCaptureState::None};
+        bool uses_selected_mode{};
+        std::uint16_t settings_revision{};
+        std::uint8_t local_buttons_held{};
+        bool override_active{};
+        ScopeUiSettings prior_settings{};
+    };
+    HostControlState host_{};
+    RetainedFrameState retained_frame_{};
     std::uint32_t revision_{1U};
     // Exact formatter changes accumulate until a renderer accepts the scene.
     // A cancelled physical job independently invalidates the screen's cache.
-    std::uint16_t dirty_labels_{0x01ffU};
-    VoltageCalibration active_calibration_{};
-    VoltageCalibration frozen_calibration_{};
-    FrameMetadata frame_{};
-    std::array<std::uint16_t, CaptureCapacity> samples_{};
-    WaveformProjection projection_{};
-    WaveformProjector projector_{};
-    SpectrumAnalyzer spectrum_{};
-    MeasurementEngine measurement_{};
-    std::uint16_t copied_{};
-    bool frame_valid_{};
-    bool spectrum_workspace_leased_{};
-    bool pending_consumption_{};
-    StoragePhase storage_phase_{StoragePhase::Idle};
-    StorageCommand storage_command_{StorageCommand::None};
-    UiStorageStatus storage_status_{UiStorageStatus::Disabled};
-    bool storage_boot_pending_{true};
-    bool storage_boot_active_{};
-    bool storage_boot_waiting_input_{};
+    std::uint16_t dirty_labels_{ScreenTextAll};
+    AnalysisWorkspace analysis_{};
+    StorageState storage_{};
     CalibrationSession calibration_session_{};
     UiCalibrationStatus calibration_status_{UiCalibrationStatus::Disabled};
 };

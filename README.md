@@ -32,7 +32,7 @@ from successive captures, measurements, FFT and export. See the
 
 The current storage profile reserves one 1 KiB Flash page at `0x0800FC00–0x0800FFFF` and gives the application 63 KiB. It stores scope settings and DC calibration only; waveform save/recall and migration of the older layout are removed. The page is not erased automatically at boot. An interrupted explicit save can lose the prior saved settings or calibration. CRC validation remains enabled.
 
-The fully enabled Studio 2 bench image uses 64,496 of 64,512 application bytes, leaving 16 bytes. Reference-board checks covered standalone acquisition, remote settings, immutable raw export, USB session recovery and successive captures. The stock-board USB option remains experimental. See the [Studio 2 verification results](host/windows/VERIFICATION.md) and [build measurements](docs/building.md).
+The latest fully enabled reference-board build uses 64,248 of 64,512 application bytes, leaving 264 bytes. Bench checks covered standalone acquisition, remote settings, immutable raw export, USB recovery, successive captures, and settings and calibration persistence. The stock-board USB option remains experimental. See the [verification results](docs/release-readiness.md) and [build measurements](docs/building.md).
 
 Use SEL to reach Domain, then + for Spectrum or − for Scope. OK controls RUN/HOLD in both views. See the [Spectrum design and bench results](docs/spectrum-design.md).
 

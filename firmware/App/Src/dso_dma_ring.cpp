@@ -1,25 +1,26 @@
 #include "dso_dma_ring.hpp"
+#include "dso_u32_counter.hpp"
 
 namespace dso {
 namespace {
-constexpr std::uint32_t HalfRange{0x80000000U};
-static_assert(HalfRange % DmaHalfSamples == 0U,
+static_assert(counter_contract::U32HalfRange % DmaHalfSamples == 0U,
               "DMA half-range threshold must divide evenly into sample periods");
 }
 
 bool valid_dma_ring_config(const DmaRingConfig& config) noexcept
 {
     // Reject at the exact integer threshold first. Since DmaHalfSamples divides
-    // HalfRange, the following 32-bit product is exactly equivalent to the
+    // U32HalfRange, the following 32-bit product is exactly equivalent to the
     // original widened product < HalfRange test and cannot overflow.
     if (config.sample_period_cycles == 0U ||
-        config.sample_period_cycles >= HalfRange / DmaHalfSamples) { return false; }
+        config.sample_period_cycles >=
+            counter_contract::U32HalfRange / DmaHalfSamples) { return false; }
     const auto half_cycles = config.sample_period_cycles * DmaHalfSamples;
     return
         config.safety_cycles >= config.sample_period_cycles &&
         config.safety_cycles < half_cycles && config.max_poll_cycles != 0U &&
         config.max_poll_cycles < half_cycles - config.safety_cycles &&
-        config.max_poll_ms != 0U && config.max_poll_ms < HalfRange;
+        config.max_poll_ms != 0U && config.max_poll_ms < counter_contract::U32HalfRange;
 }
 
 bool DmaRingMonitor::arm(DmaRingConfig config, const DmaObservation& initial,

@@ -1,8 +1,13 @@
 #include "dso_ui_model.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_calibration.hpp"
+#include "dso_front_panel.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_settings_contract.hpp"
+#include "dso_u32_counter.hpp"
 
 namespace dso {
 namespace {
-constexpr std::uint32_t HalfRange{0x80000000U};
 constexpr std::uint32_t RepeatDelayMs{400U};
 constexpr std::uint32_t RepeatIntervalMs{80U};
 
@@ -44,8 +49,9 @@ bool scope_ui_settings_valid(const ScopeUiSettings& s, std::uint8_t catalogue_co
 {
     return catalogue_count != 0U && s.timebase_index < catalogue_count &&
         (s.mode == TriggerMode::Auto || s.mode == TriggerMode::Normal || s.mode == TriggerMode::Single) &&
-        (s.edge == TriggerEdge::Rising || s.edge == TriggerEdge::Falling) && s.trigger_level_code <= 4095U &&
-        s.trigger_position_permille <= 1000U && s.vertical_offset_pixels >= -240 && s.vertical_offset_pixels <= 240 &&
+        (s.edge == TriggerEdge::Rising || s.edge == TriggerEdge::Falling) && s.trigger_level_code <= AdcMax &&
+        s.trigger_position_permille <= settings_contract::TriggerPositionPermilleMaximum &&
+        s.vertical_offset_pixels >= -240 && s.vertical_offset_pixels <= 240 &&
         s.horizontal_offset_samples >= -1024 && s.horizontal_offset_samples <= 1024 &&
         static_cast<unsigned>(s.measurement_view) <= static_cast<unsigned>(MeasurementView::Frequency);
 }
@@ -115,9 +121,7 @@ void ScopeUi::physical_update(const PanelUpdate& update) noexcept
 {
     const bool ready = valid_physical(update);
     const bool changed = physical_ready_ != ready ||
-        (ready && (physical_.generation != update.settings.generation ||
-                   physical_.microvolts_per_div != update.settings.microvolts_per_div ||
-                   physical_.coupling != update.settings.coupling ||
+        (ready && (!same_physical_settings(physical_, update.settings) ||
                    update.invalidate_acquisition || update.configuration_changed));
     physical_ready_ = ready;
     physical_ = ready ? update.settings : PhysicalSettings{0U, 0U, InputCoupling::Unknown};
@@ -186,11 +190,12 @@ void ScopeUi::adjust(int direction) noexcept
         break;
     case UiFocus::TriggerLevel:
         settings_.trigger_level_code = static_cast<std::uint16_t>(bounded(
-            settings_.trigger_level_code, direction * 16, 0, 4095));
+            settings_.trigger_level_code, direction * 16, 0, static_cast<int>(AdcMax)));
         break;
     case UiFocus::TriggerPosition:
         settings_.trigger_position_permille = static_cast<std::uint16_t>(bounded(
-            settings_.trigger_position_permille, direction * 25, 0, 1000));
+            settings_.trigger_position_permille, direction * 25, 0,
+            settings_contract::TriggerPositionPermilleMaximum));
         break;
     case UiFocus::VerticalPosition:
         settings_.vertical_offset_pixels = static_cast<std::int16_t>(bounded(
@@ -219,11 +224,13 @@ void ScopeUi::adjust(int direction) noexcept
     }
     case UiFocus::CalibrationReference:
         reference_microvolts_ = bounded(reference_microvolts_, direction * static_cast<int>(calibration_edit_step()),
-            -100000000, 100000000);
+            -static_cast<int>(MaximumCalibrationReferenceMicrovolts),
+            static_cast<int>(MaximumCalibrationReferenceMicrovolts));
         redraw(); return;
     case UiFocus::CalibrationTolerance:
         tolerance_microvolts_ = static_cast<std::uint32_t>(bounded(static_cast<int>(tolerance_microvolts_),
-            direction * static_cast<int>(calibration_edit_step()), 0, 1000000));
+            direction * static_cast<int>(calibration_edit_step()), 0,
+            static_cast<int>(MaximumCalibrationToleranceMicrovolts)));
         redraw(); return;
     case UiFocus::Calibration:
         calibration_action_ = static_cast<CalibrationAction>(bounded(static_cast<int>(calibration_action_), direction, 0, 3));
@@ -321,7 +328,7 @@ void ScopeUi::buttons(const ButtonEvents& event, std::uint32_t now_ms) noexcept
     const auto pressed = static_cast<std::uint8_t>(event.pressed & DebouncedButtons::All);
     const auto elapsed = static_cast<std::uint32_t>(now_ms - last_button_time_);
     const bool discontinuity = event.discontinuity ||
-        (observed_button_time_ && elapsed >= HalfRange);
+        (observed_button_time_ && elapsed >= counter_contract::U32HalfRange);
     observed_button_time_ = true;
     last_button_time_ = now_ms;
     if (discontinuity || (!one_key(held) && held != 0U) || (!one_key(pressed) && pressed != 0U)) {
@@ -353,7 +360,8 @@ void ScopeUi::buttons(const ButtonEvents& event, std::uint32_t now_ms) noexcept
     if (repeat_key_ == 0U || held != repeat_key_ || !repeatable()) { return; }
     const auto age = static_cast<std::uint32_t>(now_ms - press_time_);
     const auto repeat_age = static_cast<std::uint32_t>(now_ms - last_repeat_);
-    if (age >= HalfRange || repeat_age >= HalfRange) { repeat_key_ = 0U; return; }
+    if (age >= counter_contract::U32HalfRange ||
+        repeat_age >= counter_contract::U32HalfRange) { repeat_key_ = 0U; return; }
     if ((!repeated_ && age >= RepeatDelayMs) || (repeated_ && repeat_age >= RepeatIntervalMs)) {
         adjust(repeat_key_ == DebouncedButtons::Plus ? 1 : -1);
         repeated_ = true;

@@ -1,46 +1,59 @@
 #ifndef DSO_USB_PROTOCOL_HPP
 #define DSO_USB_PROTOCOL_HPP
 
+#include "dso_instrument_codes.hpp"
+#include "dso_usb_protocol_contract.hpp"
+// UsbStreamPort was originally declared here; retain that source interface.
+#include "dso_usb_transport.hpp"
+
 #include <cstdint>
 
 namespace dso {
 
-inline constexpr std::uint8_t UsbProtocolVersion{1U};
-inline constexpr std::uint8_t UsbProtocolMaximumFrame{64U};
-inline constexpr std::uint8_t UsbProtocolMaximumPayload{52U};
-inline constexpr std::uint8_t UsbProtocolMaximumSamplesPerRead{22U};
+inline constexpr std::uint8_t UsbProtocolVersion{usb_protocol_contract::Version};
+inline constexpr std::uint8_t UsbProtocolMaximumFrame{usb_protocol_contract::MaximumFrameBytes};
+inline constexpr std::uint8_t UsbProtocolMaximumPayload{usb_protocol_contract::MaximumPayloadBytes};
+inline constexpr std::uint8_t UsbProtocolMaximumSamplesPerRead{usb_protocol_contract::MaximumSamplesPerRead};
 
-// The USB backend is a transport only. session() is 0 when detached and must
-// change to a fresh nonzero value on every configured connection. read() is
-// nonblocking and returns at most capacity bytes. write() copies <=64 bytes
-// synchronously before returning true; false means busy and has no side effect.
-struct UsbStreamPort final {
-    void* context{};
-    std::uint32_t (*session)(void*) noexcept{};
-    std::uint16_t (*read)(void*, std::uint8_t*, std::uint16_t) noexcept{};
-    bool (*write)(void*, const std::uint8_t*, std::uint16_t) noexcept{};
-};
+// Keep application-facing names for the shared outer-frame and payload
+// contracts; command validation and state transitions remain with handlers.
+namespace usb_wire {
+inline constexpr std::uint8_t MagicFirstOffset{usb_protocol_contract::MagicFirstOffset};
+inline constexpr std::uint8_t MagicSecondOffset{usb_protocol_contract::MagicSecondOffset};
+inline constexpr std::uint8_t VersionOffset{usb_protocol_contract::VersionOffset};
+inline constexpr std::uint8_t OpcodeOffset{usb_protocol_contract::OpcodeOffset};
+inline constexpr std::uint8_t RequestIdOffset{usb_protocol_contract::RequestIdOffset};
+inline constexpr std::uint8_t PayloadSizeOffset{usb_protocol_contract::PayloadSizeOffset};
+inline constexpr std::uint8_t CrcOffset{usb_protocol_contract::CrcOffset};
+inline constexpr std::uint8_t CrcHeaderBytes{usb_protocol_contract::CrcHeaderBytes};
+inline constexpr std::uint8_t HeaderBytes{usb_protocol_contract::HeaderBytes};
+inline constexpr std::uint8_t MagicBytes{usb_protocol_contract::MagicBytes};
+inline constexpr std::uint8_t PayloadOffset{usb_protocol_contract::PayloadOffset};
+inline constexpr std::uint8_t StatusBytes{usb_protocol_contract::StatusBytes};
+inline constexpr std::uint8_t ResponseBodyOffset{usb_protocol_contract::ResponseBodyOffset};
+inline constexpr std::uint8_t MaximumResponseBody{usb_protocol_contract::MaximumResponseBody};
+inline constexpr std::uint8_t MagicFirst{usb_protocol_contract::MagicFirst};
+inline constexpr std::uint8_t MagicSecond{usb_protocol_contract::MagicSecond};
+} // namespace usb_wire
 
-enum class UsbOpcode : std::uint8_t {
-    Info = 1U,
-    Status = 2U,
-    BeginFrame = 3U,
-    ReadSamples = 4U,
-    EndFrame = 5U,
-    CaptureSingle = 6U,
-    CancelCapture = 7U,
-    GetSettings = 8U,
-    SetSettings = 9U,
-    CaptureSelected = 10U,
-    BeginFrameExtended = 11U,
-    SetTrigger = 12U,
-    HoldLocalRun = 13U
-};
+static_assert(usb_wire::HeaderBytes + UsbProtocolMaximumPayload == UsbProtocolMaximumFrame,
+              "Keep the established USB maximum frame size");
+static_assert(usb_wire::CrcOffset + 4U == usb_wire::HeaderBytes &&
+              usb_wire::CrcHeaderBytes == usb_wire::CrcOffset &&
+              usb_wire::MagicFirstOffset == 0U &&
+              usb_wire::MagicSecondOffset + 1U == usb_wire::MagicBytes &&
+              usb_wire::PayloadOffset == usb_wire::HeaderBytes &&
+              usb_wire::ResponseBodyOffset == usb_wire::PayloadOffset + usb_wire::StatusBytes &&
+              usb_wire::MaximumResponseBody + usb_wire::StatusBytes == UsbProtocolMaximumPayload,
+              "Keep the established USB header and response status layout");
 
-enum class UsbStatus : std::uint8_t {
-    Ok = 0U, Invalid = 1U, Busy = 2U, Stale = 3U,
-    Unsupported = 4U, Timeout = 5U, Cancelled = 6U, Fault = 7U
-};
+inline constexpr std::uint8_t UsbCaptureFlagEdgeTriggered{
+    instrument_code_contract::capture_flags::EdgeTriggered};
+inline constexpr std::uint8_t UsbCaptureFlagReservedMask{
+    instrument_code_contract::capture_flags::ReservedMask};
+
+using UsbOpcode = usb_protocol_contract::Opcode;
+using UsbStatus = usb_protocol_contract::Status;
 
 [[nodiscard]] std::uint32_t usb_protocol_crc_byte(std::uint32_t crc,
                                                   std::uint8_t byte) noexcept;

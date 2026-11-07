@@ -1,11 +1,17 @@
 #ifndef DSO_CALIBRATION_HPP
 #define DSO_CALIBRATION_HPP
 
-#include "dso_scaling.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_voltage_calibration.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 namespace dso {
+
+// Common input bounds for calibration-point references and validation tolerance.
+inline constexpr std::int64_t MaximumCalibrationReferenceMicrovolts{100000000LL};
+inline constexpr std::uint32_t MaximumCalibrationToleranceMicrovolts{1000000U};
 
 // These are summaries of a frozen DC-reference record, not individual ADC reads.
 // Caller supplies the independently known applied input voltage and provenance.
@@ -19,6 +25,9 @@ struct CalibrationPoint final {
     std::uint16_t maximum_code{};
     std::uint16_t rail_samples{};
 };
+// Checks whether the physical tuple can address a stored DC profile: nonzero
+// generation, DC coupling and one of the supported calibrated scales.
+[[nodiscard]] bool calibration_physical_valid(const PhysicalSettings& physical) noexcept;
 // Validates the supplied summary/units only, not the authenticity, age or
 // uncertainty of the applied external reference. No output is modified.
 [[nodiscard]] bool calibration_point_valid(const CalibrationPoint& point) noexcept;
@@ -53,6 +62,8 @@ private:
 // keys are supported; do not reserve RAM for unimplemented AC/GND profiles.
 inline constexpr std::size_t CalibrationSlotCount{27U};
 inline constexpr std::size_t CalibrationDcSlotCount{9U};
+static_assert(CalibrationDcSlotCount == PhysicalScaleCatalogueMicrovoltsPerDivision.size(),
+              "Keep the DSC1 DC-slot count matched to the ordered physical-scale catalogue");
 inline constexpr std::size_t CalibrationRecordMaximum{24U + CalibrationSlotCount * 20U};
 inline constexpr std::size_t CalibrationSupportedRecordMaximum{24U + CalibrationDcSlotCount * 20U};
 

@@ -1,4 +1,8 @@
 #include "dso_acquisition.hpp"
+#include "dso_front_panel.hpp"
+#include "dso_physical_settings.hpp"
+
+#include <new>
 
 namespace dso {
 namespace {
@@ -166,9 +170,7 @@ void DmaAcquisition::physical_update(const PanelUpdate& update) noexcept
 {
     if (state_ != AcquisitionState::Running) { return; }
     if (!update.ready || update.invalidate_acquisition ||
-        update.settings.generation != metadata_.physical.generation ||
-        update.settings.microvolts_per_div != metadata_.physical.microvolts_per_div ||
-        update.settings.coupling != metadata_.physical.coupling) {
+        !same_physical_settings(update.settings, metadata_.physical)) {
         fail(AcquisitionFault::PhysicalChange);
     }
 }

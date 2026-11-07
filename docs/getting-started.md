@@ -30,7 +30,7 @@ Power the instrument from its normal supply (nominally 9 V) with the usual groun
 
 Read the MCU's 96-bit unique device ID with STM32CubeProgrammer's device information view. It consists of three 32-bit words, `word0`, `word1`, and `word2`, in the order displayed. In `firmware/App/Inc/dso_board_bringup.hpp`, replace the values in `BringupUid` with those words as hexadecimal `0x........U` constants. Set `BringupBoardIdentity` to the nonzero 64-bit value `(word2 << 32) | word0`, written `0xWWWWWWWWXXXXXXXXULL` (word2 first, then word0).
 
-Use the exact values from your MCU. Do not remove or bypass the identity, MCU-type, Flash-size or display-controller guards. The firmware expects device ID `0x410`, 64 KiB Flash and ILI9341 (`0x9341`); mismatches must prevent activation. This is per-device configuration, not universal identity provisioning.
+Use the exact values from your MCU. Verify device ID `0x410` using the programmer, and do not bypass the full UID, 64 KiB Flash-size or ILI9341 (`0x9341`) activation checks. The MCU's ES096 errata says `DBGMCU_IDCODE` is not reliably readable by running software, so firmware does not use it as a runtime type guard. This is per-device configuration, not universal identity provisioning.
 
 ## 4. Build and program
 

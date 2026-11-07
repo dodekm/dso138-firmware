@@ -13,7 +13,11 @@ The CubeIDE project is configured for STM32CubeIDE **2.2.0**, GNU Tools for STM3
 3. Select **Release** and choose **Project → Build Project**.
 4. The ELF output is `firmware/Release/dso138.elf`.
 
-The checked-in `firmware/dso138.ioc` is a partial board-configuration reference, not a complete generator input. It records the STM32F103C8Tx, main clocks, ADC1/ADC2 channels, TIM2, ADC1 circular DMA, NVIC priorities, buttons, PA15 LED and SWD. Its peripheral list does not model the LCD DMA/timer transport or the USB device driver; the 48 MHz USB clock value is present without a USB IP configuration. The project instead has a hand-authored C++ `main` in `dso_platform_startup.cpp`, a checked-in startup assembly file, and custom MSP and interrupt owners. The `.ioc` also says `NoMain=false` and `DeletePrevious=true`. No safe CubeMX regeneration-and-merge workflow has been validated, and generated C entry/MSP/IRQ output could conflict with or replace project-owned integration. Import and build the existing `firmware/` CubeIDE project as supplied; do not generate code from this `.ioc` as part of ordinary build or recovery.
+The checked-in `firmware/dso138.ioc` is a partial board-configuration reference, not a complete generator input. It records the STM32F103C8Tx, main clocks, ADC1/ADC2 channels, TIM2, ADC1 circular DMA, NVIC priorities, buttons, PA15 LED and SWD. Its peripheral list does not model the LCD DMA/timer transport or the USB device driver; the 48 MHz USB clock value is present without a USB IP configuration. The project instead has a hand-authored C++ `main` and peripheral startup in `dso_platform_startup.cpp`, clock-tree setup in `dso_platform_clock.cpp`, a checked-in startup assembly file, and custom MSP and interrupt owners. The `.ioc` also says `NoMain=false` and `DeletePrevious=true`. No safe CubeMX regeneration-and-merge workflow has been validated, and generated C entry/MSP/IRQ output could conflict with or replace project-owned integration. Import and build the existing `firmware/` CubeIDE project as supplied; do not generate code from this `.ioc` as part of ordinary build or recovery.
+
+Both CubeIDE configurations include the repository-level `shared/include`
+directory for portable code shared with Studio. Keep that directory beside the
+`firmware/` and `host/` trees when building from a checkout.
 
 ## Before programming
 
@@ -73,3 +77,56 @@ shares the foreground admission check. These changes make room for the
 live settings and acquisition commands. The configured build size
 includes those commands. See the [Studio 2 engineering plan](studio-2-design.md)
 for verification scope.
+
+### Current architecture-refactor worktree build
+
+On 2026-11-06, Debug and Release builds with the worktree's default zero board
+identity and default USB identifiers succeeded. Their load span was 59,268
+bytes, leaving 5,244 bytes before the settings page. This is an unconfigured
+image: the zero identity prevents board activation and zero USB identifiers and
+the disabled stock-board trial prevent USB startup. Link-time optimization can
+discard paths that are unreachable with these constants, so this figure must not
+be used as the headroom for an operational instrument.
+
+On 2026-11-07, a clean headless CubeIDE import of a separate source-tree copy built
+Debug and Release with a synthetic nonzero UID and board identity, nonzero
+placeholder USB VID/PID, and `DSO_USB_STOCK_BENCH_TRIAL=1`, with the existing
+enabled acquisition, storage and USB profile. Both configurations discovered
+and compiled all 49 application C++ files and retained the capture file's
+non-LTO override. Their application binaries were byte-identical and ended at
+`0x0800FAC0`: **64,192 of 64,512 bytes**, leaving **320 bytes** before the
+reserved page at `0x0800FC00`. The ELF sections reserve 112 bytes of
+initialized SRAM, 13,152 bytes of `.bss` and 2,048 bytes of stack; the heap
+reservation is zero. `arm-none-eabi-size` reports 64,188 text bytes, 0 data
+bytes and 15,200 BSS bytes, including the stack reservation. The values are
+build-dependent, and placeholder identifiers do not configure a real device.
+Both measurements are software-only and do not replace the earlier Studio 2 or
+R6 hardware qualification.
+
+The clean Debug and Release builds each reported zero errors and 129 warnings,
+primarily generated `.su`/`.cyclo` sidecar-target
+diagnostics; the link also reported serial LTO compilation and an RWX load
+segment. The application C++ compilation uses `-Werror`, and both builds succeeded.
+These diagnostics are separate from the 117 sidecar warnings and CDT scanner
+warning documented for the earlier R6 CubeIDE run above.
+
+### Reference-board refactor build and bench check
+
+On 2026-11-07, a clean private build of the refactored source used the verified
+reference board identity and its existing USB bench profile. Debug and Release
+produced identical **64,256-byte** application images, leaving **256 bytes**
+before `0x0800FC00`. The linked image contains 112 bytes of initialized SRAM,
+13,152 bytes of BSS and a 2,048-byte stack reservation; the heap reservation
+is zero. Each build completed with zero errors and 130 tool diagnostics,
+including generated sidecar-target warnings and the linker RWX-segment warning.
+The identity-bound binary and build logs are private and are not release assets.
+These numbers apply to this toolchain and configuration, not all boards or
+future builds. See [release verification](release-readiness.md) for the
+bounded hardware results and remaining limits.
+
+The subsequent storage-identity correction produced matching Debug and Release
+images of **64,248 bytes**, leaving **264 bytes** in the same configured profile.
+The SRAM sections and 2,048-byte stack reservation were unchanged; both builds
+reported zero errors and 130 tool diagnostics. The image was programmed and
+tested on the reference board; see the storage follow-up in
+[release verification](release-readiness.md#storage-identity-and-persistence-follow-up).

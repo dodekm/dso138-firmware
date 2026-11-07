@@ -1,30 +1,33 @@
 #include "dso_storage.hpp"
+#include "dso_binary_endian.hpp"
 
 namespace dso {
 namespace {
-std::uint32_t crc_byte(std::uint32_t crc, std::uint8_t byte) noexcept
-{
-    crc ^= byte;
-    for (unsigned bit{}; bit < 8U; ++bit) { crc = (crc >> 1U) ^ ((crc & 1U) != 0U ? 0xedb88320U : 0U); }
-    return crc;
-}
-std::uint32_t crc_bytes(const std::uint8_t* input, std::uint16_t count) noexcept
-{
-    std::uint32_t crc{0xffffffffU};
-    for (std::uint16_t i{}; i < count; ++i) { crc = crc_byte(crc, input[i]); }
-    return crc ^ 0xffffffffU;
-}
-std::uint16_t u16(const std::uint8_t* bytes) noexcept
-{ return static_cast<std::uint16_t>(std::uint16_t{bytes[0]} | (std::uint16_t{bytes[1]} << 8U)); }
-std::uint32_t u32(const std::uint8_t* bytes) noexcept
-{
-    return std::uint32_t{bytes[0]} | (std::uint32_t{bytes[1]} << 8U) |
-        (std::uint32_t{bytes[2]} << 16U) | (std::uint32_t{bytes[3]} << 24U);
-}
-void put16(std::uint8_t* output, std::uint16_t value) noexcept
-{ output[0] = static_cast<std::uint8_t>(value); output[1] = static_cast<std::uint8_t>(value >> 8U); }
-void put32(std::uint8_t* output, std::uint32_t value) noexcept
-{ for (unsigned i{}; i < 4U; ++i) { output[i] = static_cast<std::uint8_t>(value >> (8U * i)); } }
+// Schema 2's fixed on-flash journal envelope. Change these offsets only with
+// an explicit schema change; settings payload fields belong to their codec.
+namespace storage_header {
+constexpr std::uint16_t MagicOffset{0U};
+constexpr std::uint16_t SchemaOffset{4U};
+constexpr std::uint16_t HeaderBytesOffset{6U};
+constexpr std::uint16_t GenerationOffset{8U};
+constexpr std::uint16_t PayloadBytesOffset{12U};
+constexpr std::uint16_t PayloadCrcOffset{16U};
+constexpr std::uint16_t HeaderCrcOffset{20U};
+constexpr std::uint16_t ReservedOffset{24U};
+constexpr std::uint16_t CommitOffset{30U};
+constexpr std::uint16_t HeaderCrcBytes{HeaderCrcOffset};
+static_assert(SchemaOffset == MagicOffset + 4U &&
+              HeaderBytesOffset == SchemaOffset + 2U &&
+              GenerationOffset == HeaderBytesOffset + 2U &&
+              PayloadBytesOffset == GenerationOffset + 4U &&
+              PayloadCrcOffset == PayloadBytesOffset + 4U &&
+              HeaderCrcOffset == PayloadCrcOffset + 4U &&
+              ReservedOffset == HeaderCrcOffset + 4U &&
+              CommitOffset == ReservedOffset + 6U &&
+              CommitOffset + 2U == StorageHeaderBytes,
+              "Journal schema 2 header offsets must remain byte-compatible");
+} // namespace storage_header
+
 bool busy(StorageState state) noexcept { return state == StorageState::Scanning || state == StorageState::Saving; }
 bool same(const StorageRecord& a, const StorageRecord& b) noexcept
 { return a.valid && b.valid && a.bank == b.bank && a.bytes == b.bytes && a.crc == b.crc && a.generation == b.generation; }
@@ -56,7 +59,7 @@ bool SnapshotStorage::begin_save(StorageSource source, std::uint16_t bytes) noex
     const auto latest = record_.valid ? record_.generation : 0U;
     if (latest == UINT32_MAX) { error_ = StorageError::GenerationExhausted; return false; }
     generation_ = latest + 1U;
-    source_ = source; bytes_ = bytes; page_ = 0U; offset_ = 0U; crc_ = 0xffffffffU;
+    source_ = source; bytes_ = bytes; page_ = 0U; offset_ = 0U; crc_ = checksum::Crc32IeeeInitial;
     phase_ = Phase::StagePayload; state_ = StorageState::Saving; result_ = StorageResult::None; error_ = StorageError::None;
     return true;
 }
@@ -79,11 +82,11 @@ bool SnapshotStorage::program_word(std::uint32_t offset, std::uint16_t value) no
 {
     std::uint8_t word[2]{};
     if (!read_word(offset, word)) { return false; }
-    if (u16(word) != 0xffffU) { fail(StorageError::VerificationFailure); return false; }
+    if (binary::read_u16_le(word) != 0xffffU) { fail(StorageError::VerificationFailure); return false; }
     if (value == 0xffffU) { return true; } // Do not program an unchanged erased word.
     if (!port_.program_halfword(port_.context, offset, value)) { fail(StorageError::ProgramFailure); return false; }
     if (!read_word(offset, word)) { return false; }
-    if (u16(word) != value) { fail(StorageError::VerificationFailure); return false; }
+    if (binary::read_u16_le(word) != value) { fail(StorageError::VerificationFailure); return false; }
     return true;
 }
 void SnapshotStorage::next_scan_bank(bool valid, bool blank) noexcept
@@ -102,31 +105,41 @@ void SnapshotStorage::inspect_header() noexcept
     bool blank = true;
     for (const auto byte : header_) { if (byte != 0xffU) { blank = false; break; } }
     if (blank) { phase_ = Phase::ScanBlank; offset_ = StorageHeaderBytes; return; }
-    const auto committed = u16(header_.data() + 30U) == StorageCommit;
-    if (committed && (u32(header_.data()) != StorageMagic || u16(header_.data() + 4U) != StorageSchema ||
-                      u16(header_.data() + 6U) != StorageHeaderBytes)) {
+    const auto committed = binary::read_u16_le(header_.data() + storage_header::CommitOffset) == StorageCommit;
+    if (committed && (binary::read_u32_le(header_.data() + storage_header::MagicOffset) != StorageMagic ||
+                      binary::read_u16_le(header_.data() + storage_header::SchemaOffset) != StorageSchema ||
+                      binary::read_u16_le(header_.data() + storage_header::HeaderBytesOffset) != StorageHeaderBytes)) {
         unsupported_ = 1U;
         next_scan_bank(false); return;
     }
     bool padding = true;
-    for (unsigned i{24U}; i < 30U; ++i) { if (header_[i] != 0xffU) { padding = false; } }
-    const auto length = u32(header_.data() + 12U);
-    const auto generation = u32(header_.data() + 8U);
+    for (std::uint16_t i{storage_header::ReservedOffset}; i < storage_header::CommitOffset; ++i) {
+        if (header_[i] != 0xffU) { padding = false; }
+    }
+    const auto length = binary::read_u32_le(header_.data() + storage_header::PayloadBytesOffset);
+    const auto generation = binary::read_u32_le(header_.data() + storage_header::GenerationOffset);
     if (!committed || !padding || generation == 0U || length == 0U || length > StoragePayloadReadMaximum ||
-        u32(header_.data() + 20U) != crc_bytes(header_.data(), 20U)) {
+        binary::read_u32_le(header_.data() + storage_header::HeaderCrcOffset) != checksum::crc32_ieee(
+            header_.data(), storage_header::HeaderCrcBytes)) {
         next_scan_bank(false); return;
     }
-    record_ = {generation, u32(header_.data() + 16U), static_cast<std::uint16_t>(length), 0U, false};
-    crc_ = 0xffffffffU; offset_ = 0U; phase_ = Phase::ScanPayload;
+    record_ = {generation, binary::read_u32_le(header_.data() + storage_header::PayloadCrcOffset),
+               static_cast<std::uint16_t>(length), 0U, false};
+    crc_ = checksum::Crc32IeeeInitial; offset_ = 0U; phase_ = Phase::ScanPayload;
 }
 void SnapshotStorage::make_header() noexcept
 {
     header_.fill(0xffU);
-    put32(header_.data(), StorageMagic); put16(header_.data() + 4U, StorageSchema);
-    put16(header_.data() + 6U, StorageHeaderBytes); put32(header_.data() + 8U, generation_);
-    put32(header_.data() + 12U, bytes_); put32(header_.data() + 16U, crc_ ^ 0xffffffffU);
-    put32(header_.data() + 20U, crc_bytes(header_.data(), 20U));
-    record_ = {generation_, crc_ ^ 0xffffffffU, bytes_, 0U, false};
+    binary::write_u32_le(header_.data() + storage_header::MagicOffset, StorageMagic);
+    binary::write_u16_le(header_.data() + storage_header::SchemaOffset, StorageSchema);
+    binary::write_u16_le(header_.data() + storage_header::HeaderBytesOffset, StorageHeaderBytes);
+    binary::write_u32_le(header_.data() + storage_header::GenerationOffset, generation_);
+    binary::write_u32_le(header_.data() + storage_header::PayloadBytesOffset, bytes_);
+    const auto payload_crc = checksum::crc32_ieee_finalize(crc_);
+    binary::write_u32_le(header_.data() + storage_header::PayloadCrcOffset, payload_crc);
+    binary::write_u32_le(header_.data() + storage_header::HeaderCrcOffset,
+                         checksum::crc32_ieee(header_.data(), storage_header::HeaderCrcBytes));
+    record_ = {generation_, payload_crc, bytes_, 0U, false};
 }
 
 StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
@@ -143,7 +156,7 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             break;
         case Phase::ScanBlank:
             if (!read_word(offset_, word)) { break; }
-            if (u16(word) != 0xffffU) { next_scan_bank(false); break; }
+            if (binary::read_u16_le(word) != 0xffffU) { next_scan_bank(false); break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == StorageBankBytes) { next_scan_bank(false, true); }
             break;
@@ -156,10 +169,12 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
                 if (phase_ == Phase::ScanPayload) { next_scan_bank(false); } else { fail(StorageError::VerificationFailure); }
                 break;
             }
-            for (std::uint16_t i{}; i < count; ++i) { crc_ = crc_byte(crc_, word[i]); }
+            for (std::uint16_t i{}; i < count; ++i) {
+                crc_ = checksum::crc32_ieee_update_byte(crc_, word[i]);
+            }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
             if (offset_ == record_.bytes) {
-                const auto valid = (crc_ ^ 0xffffffffU) == record_.crc;
+                const auto valid = checksum::crc32_ieee_finalize(crc_) == record_.crc;
                 if (phase_ == Phase::ScanPayload) { next_scan_bank(valid); }
                 else if (!valid) { fail(StorageError::VerificationFailure); }
                 else if (phase_ == Phase::VerifyPayload) { phase_ = Phase::Commit; }
@@ -190,11 +205,13 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             progress.erased = true; progress.state = state_; return progress;
         case Phase::VerifyErase:
             if (!read_word(offset_, word)) { break; }
-            if (u16(word) != 0xffffU) { fail(StorageError::VerificationFailure); break; }
+            if (binary::read_u16_le(word) != 0xffffU) { fail(StorageError::VerificationFailure); break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == (std::uint16_t{page_} + 1U) * StoragePageBytes) {
                 ++page_;
-                if (page_ == StoragePagesPerBank) { phase_ = Phase::WritePayload; offset_ = 0U; crc_ = 0xffffffffU; }
+                if (page_ == StoragePagesPerBank) {
+                    phase_ = Phase::WritePayload; offset_ = 0U; crc_ = checksum::Crc32IeeeInitial;
+                }
                 else { phase_ = Phase::Erase; }
             }
             break;
@@ -202,16 +219,18 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             const auto count = static_cast<std::uint16_t>(std::uint32_t{bytes_} - offset_ < 2U ? 1U : 2U);
             word[0] = staged_payload_[offset_];
             word[1] = count == 2U ? staged_payload_[offset_ + 1U] : 0xffU;
-            if (!program_word(StorageHeaderBytes + offset_, u16(word))) { break; }
-            for (std::uint16_t i{}; i < count; ++i) { crc_ = crc_byte(crc_, word[i]); }
+            if (!program_word(StorageHeaderBytes + offset_, binary::read_u16_le(word))) { break; }
+            for (std::uint16_t i{}; i < count; ++i) {
+                crc_ = checksum::crc32_ieee_update_byte(crc_, word[i]);
+            }
             offset_ = static_cast<std::uint16_t>(offset_ + count);
             if (offset_ == bytes_) { make_header(); phase_ = Phase::WriteHeader; offset_ = 0U; }
             break;
         }
         case Phase::WriteHeader:
-            if (!program_word(offset_, u16(header_.data() + offset_))) { break; }
+            if (!program_word(offset_, binary::read_u16_le(header_.data() + offset_))) { break; }
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
-            if (offset_ == 30U) { phase_ = Phase::VerifyHeader; offset_ = 0U; }
+            if (offset_ == storage_header::CommitOffset) { phase_ = Phase::VerifyHeader; offset_ = 0U; }
             break;
         case Phase::VerifyHeader:
         case Phase::VerifyCommitHeader:
@@ -220,12 +239,13 @@ StorageStep SnapshotStorage::step(std::uint16_t word_budget) noexcept
             offset_ = static_cast<std::uint16_t>(offset_ + 2U);
             if (offset_ == StorageHeaderBytes) {
                 phase_ = phase_ == Phase::VerifyHeader ? Phase::VerifyPayload : Phase::VerifyCommitPayload;
-                offset_ = 0U; crc_ = 0xffffffffU;
+                offset_ = 0U; crc_ = checksum::Crc32IeeeInitial;
             }
             break;
         case Phase::Commit:
-            if (!program_word(30U, StorageCommit)) { break; }
-            put16(header_.data() + 30U, StorageCommit); phase_ = Phase::VerifyCommitHeader; offset_ = 0U;
+            if (!program_word(storage_header::CommitOffset, StorageCommit)) { break; }
+            binary::write_u16_le(header_.data() + storage_header::CommitOffset, StorageCommit);
+            phase_ = Phase::VerifyCommitHeader; offset_ = 0U;
             break;
         }
     }

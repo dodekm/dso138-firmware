@@ -1,13 +1,13 @@
 #pragma once
 
-#include "capture.hpp"
-
 #include <cstddef>
 #include <optional>
 #include <vector>
 
 namespace dso
 {
+
+struct Capture;
 
 enum class SpectrumWindow
 {

@@ -1,6 +1,7 @@
 #include "dso_stm32_lcd_dma.hpp"
 #include "dso_stm32_board_clock.hpp"
 #include "dso_stm32_shared_guard.hpp"
+#include "dso_u32_counter.hpp"
 #include "main.h"
 #include <cstdint>
 
@@ -15,7 +16,7 @@ constexpr std::uint32_t Errors{DMA_ISR_TEIF2 | DMA_ISR_TEIF3 | DMA_ISR_TEIF5};
 constexpr std::uint32_t Requests{TIM_DIER_UDE | TIM_DIER_CC1DE | TIM_DIER_CC2DE};
 constexpr std::uint32_t Interrupts{DMA_CCR_TCIE | DMA_CCR_HTIE | DMA_CCR_TEIE};
 constexpr std::uint32_t Common{DMA_CCR_DIR | DMA_CCR_PSIZE_1 | DMA_CCR_MSIZE_1 | DMA_CCR_TEIE};
-constexpr std::uint32_t HalfRange{0x80000000U}, HoldCycles{36U}, TimeoutCycles{72000U};
+constexpr std::uint32_t HoldCycles{36U}, TimeoutCycles{72000U};
 struct Context final {
     alignas(4) std::uint32_t words[2U * DisplayDmaPixels]{};
     std::uint32_t low{}, high{};
@@ -259,13 +260,18 @@ TransferState stm32_lcd_dma_poll() noexcept
     if ((context.flags & Errors) != 0U) { static_cast<void>(fail(Stm32LcdDmaFault::Transfer)); }
     else if (context.ended_valid) {
         const auto hold = static_cast<std::uint32_t>(DWT->CYCCNT-context.ended);
-        if (hold >= HalfRange || DMA1_Channel2->CNDTR != 0U || DMA1_Channel3->CNDTR != 0U || DMA1_Channel5->CNDTR != 0U ||
-            !pins() || (GPIOC->ODR & (Select | Data | Write)) != (Data | Write) || (GPIOB->ODR & ReadReset) != ReadReset) {
+        if (hold >= counter_contract::U32HalfRange ||
+            DMA1_Channel2->CNDTR != 0U || DMA1_Channel3->CNDTR != 0U ||
+            DMA1_Channel5->CNDTR != 0U || !pins() ||
+            (GPIOC->ODR & (Select | Data | Write)) != (Data | Write) ||
+            (GPIOB->ODR & ReadReset) != ReadReset) {
             static_cast<void>(fail(Stm32LcdDmaFault::Transfer));
         } else if ((GPIOB->ODR & DataMask) != (context.words[context.bytes-1U] & DataMask)) {
             static_cast<void>(fail(Stm32LcdDmaFault::Transfer));
         } else if (hold >= HoldCycles) { context.state = TransferState::Complete; }
-    } else if (elapsed >= TimeoutCycles || elapsed >= HalfRange) { static_cast<void>(fail(Stm32LcdDmaFault::Timing)); }
+    } else if (elapsed >= TimeoutCycles || elapsed >= counter_contract::U32HalfRange) {
+        static_cast<void>(fail(Stm32LcdDmaFault::Timing));
+    }
     if (context.state == TransferState::Pending && context.polls >= 4096U) { static_cast<void>(fail(Stm32LcdDmaFault::Timing)); }
     return context.state;
 }

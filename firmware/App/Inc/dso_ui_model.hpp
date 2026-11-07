@@ -1,12 +1,15 @@
 #ifndef DSO_UI_MODEL_HPP
 #define DSO_UI_MODEL_HPP
 
-#include "dso_capture.hpp"
-#include "dso_front_panel.hpp"
+#include "dso_physical_settings.hpp"
+#include "dso_trigger.hpp"
 
 #include <cstdint>
 
 namespace dso {
+
+struct PanelUpdate;
+struct ButtonEvents;
 
 enum class UiFocus : std::uint8_t {
     Timebase, TriggerMode, TriggerEdge, TriggerLevel, TriggerPosition,

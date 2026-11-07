@@ -5,9 +5,9 @@
 
 namespace dso::detail {
 
-// Round a signed Q16 code/gain product to integer microvolts. Callers validate
-// gain_shift (0..2); the product magnitude is bounded below 2^60, so taking
-// its signed magnitude and adding the half-denominator cannot overflow.
+// Round a signed Q16 code/gain product to integer microvolts, with half ties
+// away from zero. Callers validate gain_shift (0..2); calibration bounds keep
+// the product magnitude below 2^60, so signed magnitude cannot overflow.
 [[nodiscard]] inline std::int64_t round_gain_product(std::int64_t product,
                                                       std::uint8_t gain_shift) noexcept
 {
@@ -20,4 +20,4 @@ namespace dso::detail {
 
 } // namespace dso::detail
 
-#endif
+#endif // DSO_VOLTAGE_MATH_HPP

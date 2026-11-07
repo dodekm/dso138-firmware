@@ -2,10 +2,12 @@
 #define DSO_USB_SERVICE_HPP
 
 #include "dso_usb_protocol.hpp"
-#include "dso_ui_controller.hpp"
+#include "dso_usb_transport.hpp"
 #include <array>
 
 namespace dso {
+
+class ScopeController;
 
 // Compact foreground protocol adapter. step() reads <=16 transport bytes,
 // handles no more than one command, and uses fixed buffers only. It is not an

@@ -1,4 +1,7 @@
 #include "trigger_controls.hpp"
+#include "instrument_codes.hpp"
+#include "dso_adc_contract.hpp"
+#include "dso_settings_contract.hpp"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -10,13 +13,6 @@
 
 namespace dso
 {
-namespace
-{
-constexpr quint8 TriggerWriteMask = 0x1cU;
-constexpr quint8 HoldCapability = 0x20U;
-constexpr quint8 SettingsWritableNow = 0x04U;
-constexpr quint8 HoldAvailableNow = 0x10U;
-}
 
 TriggerControls::TriggerControls(QWidget *parent) : QWidget(parent)
 {
@@ -39,16 +35,19 @@ TriggerControls::TriggerControls(QWidget *parent) : QWidget(parent)
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     edge_ = new QComboBox(details_);
     edge_->setAccessibleName(QStringLiteral("Trigger edge"));
-    edge_->addItems({QStringLiteral("Rising"), QStringLiteral("Falling")});
+    edge_->addItem(QStringLiteral("Rising"),
+                   static_cast<int>(instrument_code::code(instrument_code::TriggerEdge::Rising)));
+    edge_->addItem(QStringLiteral("Falling"),
+                   static_cast<int>(instrument_code::code(instrument_code::TriggerEdge::Falling)));
     form->addRow(QStringLiteral("Edge"), edge_);
     level_ = new QSpinBox(details_);
-    level_->setRange(0, 4095);
+    level_->setRange(0, adc_contract::MaximumCode);
     level_->setSuffix(QStringLiteral(" ADC"));
     level_->setAccessibleName(QStringLiteral("Trigger level in ADC codes"));
     form->addRow(QStringLiteral("Level"), level_);
     position_ = new QDoubleSpinBox(details_);
     position_->setDecimals(1);
-    position_->setRange(0.0, 100.0);
+    position_->setRange(0.0, settings_contract::TriggerPositionPermilleMaximum / 10.0);
     position_->setSingleStep(2.5);
     position_->setSuffix(QStringLiteral("%"));
     position_->setAccessibleName(QStringLiteral("Trigger position as percent pretrigger"));
@@ -63,7 +62,7 @@ TriggerControls::TriggerControls(QWidget *parent) : QWidget(parent)
     connect(level_, &QSpinBox::valueChanged, this, [this] { refreshActions(); });
     connect(position_, &QDoubleSpinBox::valueChanged, this, [this] { refreshActions(); });
     connect(apply_, &QPushButton::clicked, this, [this] {
-        emit triggerRequested(edge_->currentIndex(), level_->value(), positionPermille());
+        emit triggerRequested(edge_->currentData().toInt(), level_->value(), positionPermille());
     });
     refreshActions();
 }
@@ -101,7 +100,7 @@ int TriggerControls::positionPermille() const
 void TriggerControls::showAppliedTrigger()
 {
     const QSignalBlocker edgeGuard(edge_), levelGuard(level_), positionGuard(position_);
-    edge_->setCurrentIndex(applied_.triggerEdge);
+    edge_->setCurrentIndex(edge_->findData(static_cast<int>(applied_.triggerEdge)));
     level_->setValue(applied_.triggerLevel);
     position_->setValue(applied_.triggerPositionPermille / 10.0);
     refreshActions();
@@ -112,15 +111,20 @@ void TriggerControls::refreshActions()
     const bool present = availability_ == protocol::SettingsAvailability::Supported ||
                          availability_ == protocol::SettingsAvailability::Stale;
     const bool fresh = availability_ == protocol::SettingsAvailability::Supported;
-    const bool canHold = present && (applied_.writableMask & HoldCapability) != 0;
+    const bool canHold = present &&
+                         (applied_.writableMask & protocol::settings_writable::LocalRunPause) != 0;
     hold_->setVisible(canHold);
-    hold_->setEnabled(fresh && interactive_ && (applied_.flags & HoldAvailableNow) != 0);
-    const bool canEdit = present && (applied_.writableMask & TriggerWriteMask) == TriggerWriteMask;
+    hold_->setEnabled(fresh && interactive_ &&
+                      (applied_.flags & protocol::settings_flags::LocalRunPauseAdmissibleNow) != 0);
+    const bool canEdit = present &&
+                         (applied_.writableMask & protocol::settings_writable::TriggerFields) ==
+                             protocol::settings_writable::TriggerFields;
     expand_->setVisible(canEdit);
     details_->setVisible(canEdit && expand_->isChecked());
-    const bool writable = fresh && interactive_ && (applied_.flags & SettingsWritableNow) != 0;
+    const bool writable = fresh && interactive_ &&
+                          (applied_.flags & protocol::settings_flags::WriteAdmissibleNow) != 0;
     details_->setEnabled(writable);
-    apply_->setEnabled(writable && (edge_->currentIndex() != applied_.triggerEdge ||
+    apply_->setEnabled(writable && (edge_->currentData().toInt() != applied_.triggerEdge ||
                                     level_->value() != applied_.triggerLevel ||
                                     positionPermille() != applied_.triggerPositionPermille));
 }

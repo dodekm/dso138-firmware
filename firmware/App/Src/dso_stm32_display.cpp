@@ -1,5 +1,6 @@
 #include "dso_stm32_display.hpp"
 #include "dso_stm32_shared_guard.hpp"
+#include "dso_u32_counter.hpp"
 #include "dso_board_bringup.hpp"
 #if DSO_BOARD_BRINGUP
 #include "dso_stm32_lcd_dma.hpp"
@@ -18,7 +19,6 @@ constexpr std::uint32_t OwnedC{Select | Data | Write};
 constexpr std::uint32_t GpioClocks{RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN};
 constexpr std::uint32_t PhaseCycles{36U}; // >=500ns at the required 72MHz HCLK.
 constexpr std::uint32_t MillisecondCycles{72000U};
-constexpr std::uint32_t HalfRange{0x80000000U};
 constexpr unsigned PhaseIterations{4096U}, MillisecondIterations{100000U};
 
 struct Binding final {
@@ -106,7 +106,7 @@ bool wait_cycles(std::uint32_t cycles, unsigned iterations) noexcept
     const auto start = static_cast<std::uint32_t>(DWT->CYCCNT);
     for (unsigned i{}; i < iterations; ++i) {
         const auto elapsed = static_cast<std::uint32_t>(DWT->CYCCNT - start);
-        if (elapsed >= HalfRange) { return false; }
+        if (elapsed >= counter_contract::U32HalfRange) { return false; }
         if (elapsed >= cycles) { return true; }
         __NOP();
     }

@@ -13,16 +13,19 @@
 namespace dso {
 volatile BringupStatus dso_bringup_status{};
 
+bool bringup_identity_matches() noexcept
+{
+    // ES096: DBGMCU_IDCODE is not a reliable software-readable MCU ID.
+    return BringupBoardIdentity != 0U &&
+        *reinterpret_cast<volatile const std::uint16_t*>(FLASHSIZE_BASE) == 64U &&
+        HAL_GetUIDw0() == BringupUid[0] && HAL_GetUIDw1() == BringupUid[1] &&
+        HAL_GetUIDw2() == BringupUid[2];
+}
+
 bool activate_bringup_board(Ili9341Display& display) noexcept
 {
     dso_bringup_status.stage = 1U;
-    const auto debug_id = DBGMCU->IDCODE;
-    // ES096: DBGMCU can read zero outside a debug session. The complete UID
-    // and specified Flash-size checks remain mandatory for standalone boot.
-    if ((debug_id != 0U && (debug_id & 0xfffU) != 0x410U) ||
-        *reinterpret_cast<volatile const std::uint16_t*>(FLASHSIZE_BASE) != 64U ||
-        HAL_GetUIDw0() != BringupUid[0] || HAL_GetUIDw1() != BringupUid[1] || HAL_GetUIDw2() != BringupUid[2] ||
-        BringupLcdId != 0x9341U) { return false; }
+    if (!bringup_identity_matches() || BringupLcdId != 0x9341U) { return false; }
 #if DSO_BOARD_TEST_OUTPUT
     // The reset/direct-Flash/TIM3 ownership and electrical qualification inputs
     // are explicit bench assumptions. This code does not measure or prove them.
@@ -85,6 +88,7 @@ std::uint16_t bringup_buttons() noexcept
 } // namespace dso
 #else
 namespace dso {
+bool bringup_identity_matches() noexcept { return false; }
 // Retained verification entry in ordinary builds. Compile-time dormancy is
 // unconditional and grants no peripheral authority, even when called directly.
 bool activate_bringup_board(Ili9341Display&) noexcept { return false; }

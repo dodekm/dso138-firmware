@@ -1,5 +1,6 @@
 #include "waveform.hpp"
-#include "capture.hpp"
+#include "capture_model.hpp"
+#include "instrument_codes.hpp"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -317,7 +318,9 @@ void WaveformWidget::paintEvent(QPaintEvent *)
         const double x = xForTime(0, a);
         p.setPen(triggerColor);
         const QString marker =
-            (capture_->metadata.flags & 8U) != 0 ? QStringLiteral("T") : QStringLiteral("0");
+            (capture_->metadata.flags & instrument_code::capture_flags::EdgeTriggered) != 0
+                ? QStringLiteral("T")
+                : QStringLiteral("0");
         p.drawText(QRectF(x - 15, r.top() - 20, 30, 18), Qt::AlignCenter, marker);
     }
     p.setPen(muted);

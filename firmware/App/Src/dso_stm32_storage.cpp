@@ -1,4 +1,5 @@
 #include "dso_stm32_storage.hpp"
+#include "dso_board_bringup.hpp"
 #include "dso_stm32_shared_guard.hpp"
 #include "main.h"
 
@@ -101,9 +102,9 @@ bool prepare(std::uint64_t board_identity, Stm32StorageQualification q) noexcept
     if (board_identity == 0U) { return fail(Stm32StorageFault::Identity); }
     if (!stm32_foreground()) { return fail(Stm32StorageFault::Execution); }
     if (!ready_hardware()) { return false; }
-    const auto id = DBGMCU->IDCODE;
-    if (*reinterpret_cast<volatile const std::uint16_t*>(0x1ffff7e0U) != 64U ||
-        (id != 0U && (id & 0xfffU) != 0x410U)) { return fail(Stm32StorageFault::Identity); }
+    if (board_identity != BringupBoardIdentity || !bringup_identity_matches()) {
+        return fail(Stm32StorageFault::Identity);
+    }
     if ((FLASH->WRPR & 0x8000U) != 0x8000U) { return fail(Stm32StorageFault::Protection); }
     const auto begin = reinterpret_cast<std::uintptr_t>(&__dso_storage_ram_start);
     const auto end = reinterpret_cast<std::uintptr_t>(&__dso_storage_ram_end);

@@ -74,6 +74,9 @@ static_assert(offsetof(BringupAcquisitionStatus, frame_code_flags) == 48U &&
               "Keep the compact coherent publication ABI bounded");
 extern volatile BringupAcquisitionStatus dso_bringup_acquisition;
 [[nodiscard]] std::uint32_t bringup_cycles() noexcept;
+// ES096 makes DBGMCU_IDCODE unreliable to running software. Match the
+// owner-configured full UID and 64 KiB Flash size instead.
+[[nodiscard]] bool bringup_identity_matches() noexcept;
 // Classic-board energization, bound to the owner-configured MCU UID. The
 // permissions are recorded bench assumptions, not measured rail/electrical
 // acceptance. Acquisition, test output and storage are explicit build choices.

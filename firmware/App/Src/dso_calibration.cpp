@@ -1,13 +1,16 @@
 #include "dso_calibration.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_calibration_contract.hpp"
+#include "dso_binary_endian.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_crc32.hpp"
+#include "dso_physical_settings.hpp"
 #include "dso_u64_division.hpp"
 #include "dso_voltage_math.hpp"
 
 namespace dso {
 namespace {
-constexpr std::uint32_t MaximumCodeQ16{4095U * 65536U};
-constexpr std::int64_t MaximumReference{100000000LL}; // +/-100 V, explicit API bound.
-constexpr std::uint32_t Ranges[9]{10000U, 20000U, 50000U, 100000U, 200000U,
-                                 500000U, 1000000U, 2000000U, 5000000U};
+constexpr std::uint32_t MaximumCodeQ16{std::uint32_t{AdcMax} * 65536U};
 constexpr std::size_t HeaderBytes{20U};
 constexpr std::size_t EntryBytes{20U};
 
@@ -15,27 +18,23 @@ int slot(const PhysicalSettings& physical) noexcept
 {
     if (physical.generation == 0U || physical.coupling != InputCoupling::Dc) { return -1; }
     for (unsigned range{}; range < CalibrationDcSlotCount; ++range) {
-        if (Ranges[range] == physical.microvolts_per_div) {
+        if (PhysicalScaleCatalogueMicrovoltsPerDivision[range] == physical.microvolts_per_div) {
             return static_cast<int>(range);
         }
     }
     return -1;
 }
 
-bool same_physical(const PhysicalSettings& a, const PhysicalSettings& b) noexcept
-{
-    return a.generation == b.generation && a.microvolts_per_div == b.microvolts_per_div && a.coupling == b.coupling;
-}
-
 bool valid_point(const CalibrationPoint& point) noexcept
 {
-    return slot(point.physical) >= 0 && point.physical.coupling == InputCoupling::Dc &&
+    return calibration_physical_valid(point.physical) &&
         point.acquisition_epoch != 0U && point.samples >= 64U && point.samples <= CaptureCapacity &&
-        point.minimum_code > 0U && point.maximum_code < 4095U && point.minimum_code <= point.maximum_code &&
+        point.minimum_code > 0U && point.maximum_code < AdcMax && point.minimum_code <= point.maximum_code &&
         std::uint32_t{point.maximum_code} - point.minimum_code <= 32U && point.rail_samples == 0U &&
         point.mean_code_q16 >= std::uint32_t{point.minimum_code} * 65536U &&
         point.mean_code_q16 <= std::uint32_t{point.maximum_code} * 65536U &&
-        point.reference_microvolts >= -MaximumReference && point.reference_microvolts <= MaximumReference;
+        point.reference_microvolts >= -MaximumCalibrationReferenceMicrovolts &&
+        point.reference_microvolts <= MaximumCalibrationReferenceMicrovolts;
 }
 
 std::int64_t round_div(std::int64_t numerator, std::uint64_t denominator) noexcept
@@ -60,43 +59,35 @@ std::uint64_t difference(std::int64_t a, std::int64_t b) noexcept
     return static_cast<std::uint64_t>(delta < 0 ? -delta : delta);
 }
 
-void put16(std::uint8_t* p, std::uint16_t value) noexcept
-{ p[0] = static_cast<std::uint8_t>(value); p[1] = static_cast<std::uint8_t>(value >> 8U); }
-void put32(std::uint8_t* p, std::uint32_t value) noexcept
-{ for (unsigned i{}; i < 4U; ++i) { p[i] = static_cast<std::uint8_t>(value >> (i * 8U)); } }
-void put64(std::uint8_t* p, std::uint64_t value) noexcept
-{
-    put32(p, static_cast<std::uint32_t>(value));
-    put32(p + 4U, static_cast<std::uint32_t>(value >> 32U));
-}
-std::uint16_t get16(const std::uint8_t* p) noexcept
-{ return static_cast<std::uint16_t>(p[0] | (std::uint16_t{p[1]} << 8U)); }
-std::uint32_t get32(const std::uint8_t* p) noexcept
-{
-    return std::uint32_t{p[0]} | (std::uint32_t{p[1]} << 8U) |
-        (std::uint32_t{p[2]} << 16U) | (std::uint32_t{p[3]} << 24U);
-}
-std::uint64_t get64(const std::uint8_t* p) noexcept
-{
-    return std::uint64_t{get32(p)} | (std::uint64_t{get32(p + 4U)} << 32U);
-}
-std::uint32_t crc32(const std::uint8_t* bytes, std::size_t count) noexcept
-{
-    std::uint32_t crc{0xffffffffU};
-    for (std::size_t i{}; i < count; ++i) {
-        crc ^= bytes[i];
-        for (unsigned bit{}; bit < 8U; ++bit) {
-            crc = (crc >> 1U) ^ ((crc & 1U) != 0U ? 0xedb88320U : 0U);
-        }
-    }
-    return crc ^ 0xffffffffU;
-}
 bool overlaps(const void* first, std::size_t first_size, const void* second, std::size_t second_size) noexcept
 {
     const auto a = reinterpret_cast<std::uintptr_t>(first);
     const auto b = reinterpret_cast<std::uintptr_t>(second);
     return a <= b ? b - a < first_size : a - b < second_size;
 }
+}
+
+bool calibration_valid(VoltageCalibration calibration) noexcept
+{
+    return (calibration.kind == CalibrationKind::Nominal || calibration.kind == CalibrationKind::Measured) &&
+        calibration_contract::profile_values_valid(calibration.zero_code_q16,
+            calibration.microvolts_per_code_q16, calibration.gain_shift);
+}
+
+bool code_to_microvolts(std::uint16_t code, VoltageCalibration calibration,
+                        std::int64_t& microvolts) noexcept
+{
+    if (code > AdcMax || !calibration_valid(calibration)) { return false; }
+    const auto delta = std::int64_t{code} * 65536 - calibration.zero_code_q16;
+    // |delta|<=268369920, gain<=UINT32_MAX: product<2^60, including rounding.
+    microvolts = detail::round_gain_product(delta * calibration.microvolts_per_code_q16,
+        calibration.gain_shift);
+    return true;
+}
+
+bool calibration_physical_valid(const PhysicalSettings& physical) noexcept
+{
+    return slot(physical) >= 0;
 }
 
 bool calibration_point_valid(const CalibrationPoint& point) noexcept
@@ -110,7 +101,10 @@ bool CalibrationFit::begin(const CalibrationPoint& first, const CalibrationPoint
     profile_ = VoltageCalibration{};
     validation_error_ = 0U;
     if (!valid_point(first) || !valid_point(second)) { return false; }
-    if (!same_physical(first.physical, second.physical)) { status_ = CalibrationStatus::PhysicalMismatch; return false; }
+    if (!same_physical_settings(first.physical, second.physical)) {
+        status_ = CalibrationStatus::PhysicalMismatch;
+        return false;
+    }
     if (first.acquisition_epoch == second.acquisition_epoch) { status_ = CalibrationStatus::StaleEpoch; return false; }
     const auto delta_code = std::int64_t{second.mean_code_q16} - first.mean_code_q16;
     const auto delta_voltage = second.reference_microvolts - first.reference_microvolts;
@@ -168,10 +162,14 @@ bool CalibrationFit::begin(const CalibrationPoint& first, const CalibrationPoint
 
 bool CalibrationFit::validate(const CalibrationPoint& third, std::uint32_t tolerance_microvolts) noexcept
 {
-    if (status_ != CalibrationStatus::Pending || !valid_point(third) || tolerance_microvolts > 1000000U) {
+    if (status_ != CalibrationStatus::Pending || !valid_point(third) ||
+        tolerance_microvolts > MaximumCalibrationToleranceMicrovolts) {
         status_ = CalibrationStatus::InvalidPoint; return false;
     }
-    if (!same_physical(physical_, third.physical)) { status_ = CalibrationStatus::PhysicalMismatch; return false; }
+    if (!same_physical_settings(physical_, third.physical)) {
+        status_ = CalibrationStatus::PhysicalMismatch;
+        return false;
+    }
     if (third.acquisition_epoch == epochs_[0] || third.acquisition_epoch == epochs_[1]) {
         status_ = CalibrationStatus::StaleEpoch; return false;
     }
@@ -227,21 +225,21 @@ std::size_t CalibrationBank::export_record(std::uint8_t* output, std::size_t cap
     bool wide{};
     for (const auto& entry : entries_) { wide = wide || entry.profile.gain_shift != 0U; }
     output[0] = 'D'; output[1] = 'S'; output[2] = 'C'; output[3] = '1';
-    put16(output + 4U, wide ? 2U : 1U); put16(output + 6U, count);
-    put64(output + 8U, board_identity_); put32(output + 16U, next_revision_);
+    binary::write_u16_le(output + 4U, wide ? 2U : 1U); binary::write_u16_le(output + 6U, count);
+    binary::write_u64_le(output + 8U, board_identity_); binary::write_u32_le(output + 16U, next_revision_);
     std::size_t offset{HeaderBytes};
     for (std::size_t index{}; index < entries_.size(); ++index) {
         const auto& entry = entries_[index];
         if (entry.revision == 0U) { continue; }
-        put32(output + offset, Ranges[index]);
+        binary::write_u32_le(output + offset, PhysicalScaleCatalogueMicrovoltsPerDivision[index]);
         output[offset + 4U] = static_cast<std::uint8_t>(InputCoupling::Dc);
         output[offset + 5U] = static_cast<std::uint8_t>(CalibrationKind::Measured);
-        output[offset + 6U] = entry.profile.gain_shift; output[offset + 7U] = 0U; put32(output + offset + 8U, entry.revision);
-        put32(output + offset + 12U, static_cast<std::uint32_t>(entry.profile.zero_code_q16));
-        put32(output + offset + 16U, entry.profile.microvolts_per_code_q16);
+        output[offset + 6U] = entry.profile.gain_shift; output[offset + 7U] = 0U; binary::write_u32_le(output + offset + 8U, entry.revision);
+        binary::write_u32_le(output + offset + 12U, static_cast<std::uint32_t>(entry.profile.zero_code_q16));
+        binary::write_u32_le(output + offset + 16U, entry.profile.microvolts_per_code_q16);
         offset += EntryBytes;
     }
-    put32(output + offset, crc32(output, offset));
+    binary::write_u32_le(output + offset, checksum::crc32_ieee(output, offset));
     return size;
 }
 
@@ -249,29 +247,29 @@ bool calibration_record_valid(const std::uint8_t* input, std::size_t size, std::
 {
     if (expected_board == 0U || input == nullptr || size < HeaderBytes + 4U || size > CalibrationRecordMaximum ||
         input[0] != 'D' || input[1] != 'S' || input[2] != 'C' || input[3] != '1' ||
-        (get16(input + 4U) != 1U && get16(input + 4U) != 2U) || get64(input + 8U) != expected_board) { return false; }
-    const auto schema = get16(input + 4U);
-    const auto count = get16(input + 6U);
-    const auto next = get32(input + 16U);
+        (binary::read_u16_le(input + 4U) != 1U && binary::read_u16_le(input + 4U) != 2U) || binary::read_u64_le(input + 8U) != expected_board) { return false; }
+    const auto schema = binary::read_u16_le(input + 4U);
+    const auto count = binary::read_u16_le(input + 6U);
+    const auto next = binary::read_u32_le(input + 16U);
     if (count > CalibrationDcSlotCount || next == 0U ||
         size != HeaderBytes + std::size_t{count} * EntryBytes + 4U ||
-        get32(input + size - 4U) != crc32(input, size - 4U)) { return false; }
+        binary::read_u32_le(input + size - 4U) != checksum::crc32_ieee(input, size - 4U)) { return false; }
     int previous{-1}; bool wide{};
     for (std::size_t i{}; i < count; ++i) {
         const auto* entry = input + HeaderBytes + i * EntryBytes;
-        const PhysicalSettings key{1U, get32(entry), static_cast<InputCoupling>(entry[4])};
+        const PhysicalSettings key{1U, binary::read_u32_le(entry), static_cast<InputCoupling>(entry[4])};
         const auto index = slot(key);
-        const auto revision = get32(entry + 8U);
-        const auto zero = get32(entry + 12U);
+        const auto revision = binary::read_u32_le(entry + 8U);
+        const auto zero = binary::read_u32_le(entry + 12U);
         const VoltageCalibration profile{zero <= MaximumCodeQ16 ? static_cast<std::int32_t>(zero) : -1,
-            get32(entry + 16U), static_cast<CalibrationKind>(entry[5]), entry[6]};
+            binary::read_u32_le(entry + 16U), static_cast<CalibrationKind>(entry[5]), entry[6]};
         wide = wide || profile.gain_shift != 0U;
         if (index <= previous || key.coupling != InputCoupling::Dc || entry[7] != 0U ||
             (schema == 1U && entry[6] != 0U) ||
             revision == 0U || revision >= next || profile.kind != CalibrationKind::Measured || !calibration_valid(profile)) { return false; }
         // Revisions are unique across installs. Check at most eight prior entries.
         for (std::size_t j{}; j < i; ++j) {
-            if (get32(input + HeaderBytes + j * EntryBytes + 8U) == revision) { return false; }
+            if (binary::read_u32_le(input + HeaderBytes + j * EntryBytes + 8U) == revision) { return false; }
         }
         previous = index;
     }
@@ -283,17 +281,17 @@ bool CalibrationBank::import_record(const std::uint8_t* input, std::size_t size)
     // Reject aliased bytes before a validator can inspect object storage.
     if (input == nullptr || overlaps(input, size, this, sizeof(*this)) ||
         !calibration_record_valid(input, size, board_identity_)) { return false; }
-    const auto count = get16(input + 6U);
+    const auto count = binary::read_u16_le(input + 6U);
     // No externally visible mutation precedes complete validation. Foreground
     // owner excludes concurrent readers; aliased input was rejected above.
     clear();
     for (std::size_t i{}; i < count; ++i) {
         const auto* entry = input + HeaderBytes + i * EntryBytes;
-        const auto index = slot(PhysicalSettings{1U, get32(entry), InputCoupling::Dc});
+        const auto index = slot(PhysicalSettings{1U, binary::read_u32_le(entry), InputCoupling::Dc});
         entries_[static_cast<std::size_t>(index)] = Entry{
-            {static_cast<std::int32_t>(get32(entry + 12U)), get32(entry + 16U), CalibrationKind::Measured, entry[6]}, get32(entry + 8U)};
+            {static_cast<std::int32_t>(binary::read_u32_le(entry + 12U)), binary::read_u32_le(entry + 16U), CalibrationKind::Measured, entry[6]}, binary::read_u32_le(entry + 8U)};
     }
-    next_revision_ = get32(input + 16U);
+    next_revision_ = binary::read_u32_le(input + 16U);
     return true;
 }
 

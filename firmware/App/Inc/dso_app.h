@@ -17,6 +17,18 @@ enum DsoBenchPhase {
     DSO_BENCH_WAITING_FOR_HARDWARE = 1,
     DSO_BENCH_FAULT = 2
 };
+/* Stable debugger-visible values stored in DsoBenchStatus.fault. Keep the
+ * assigned numbers unchanged; value 2 is intentionally unassigned. */
+enum DsoAppFaultReason {
+    DSO_APP_FAULT_NONE = 0,
+    DSO_APP_FAULT_CLOCK_OR_TIMING = 1,
+    DSO_APP_FAULT_HAL_ERROR_HANDLER = 3,
+    DSO_APP_FAULT_DORMANT_DISPLAY_GUARD = 4,
+    DSO_APP_FAULT_DORMANT_ANALOG_POWER_GUARD = 5,
+    DSO_APP_FAULT_DORMANT_STORAGE_GUARD = 6,
+    DSO_APP_FAULT_BOARD_ACTIVATION = 7,
+    DSO_APP_FAULT_PANEL_SAMPLER_START = 8
+};
 /* Debugger diagnostics, not an atomic multi-field publication or persistence
  * format. Fields use fixed widths; ui_work contains the C++ UiWork value.
  */

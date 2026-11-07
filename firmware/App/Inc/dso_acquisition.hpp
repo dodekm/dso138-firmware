@@ -3,12 +3,15 @@
 
 #include "dso_capture.hpp"
 #include "dso_dma_ring.hpp"
-#include "dso_front_panel.hpp"
+#include "dso_frame_metadata.hpp"
+#include "dso_physical_settings.hpp"
 #include "dso_timebase.hpp"
-#include <new>
+#include <cstdint>
 #include <type_traits>
 
 namespace dso {
+
+struct PanelUpdate;
 
 struct AcquisitionRequest final {
     CaptureConfig capture;
@@ -16,14 +19,6 @@ struct AcquisitionRequest final {
     TimebasePlan timing;
     DmaRingConfig dma;
     std::uint32_t epoch;
-};
-struct FrameMetadata final {
-    PhysicalSettings physical;
-    TimebasePlan timing;
-    CaptureConfig capture;
-    std::uint32_t acquisition_epoch;
-    std::uint32_t trigger_sequence;
-    bool edge_triggered;
 };
 enum class AcquisitionState { Stopped, Running, Ready, Fault };
 enum class AcquisitionFault { None, Transport, InvalidSamples, PhysicalChange, PortFailure, Protocol };
@@ -107,6 +102,20 @@ private:
     };
     static_assert(sizeof(Workspace) == 2048U, "Keep the FFT/DMA lease within the existing 2 KiB workspace");
     enum class WorkspaceOwner : std::uint8_t { Dma, Recall, Spectrum };
+    [[nodiscard]] bool recall_staging_active() const noexcept
+    {
+        return workspace_owner_ == WorkspaceOwner::Recall;
+    }
+    // Borrowed byte views are valid only after begin_recall_staging() and
+    // before end_recall_staging(); callers must hold that lease.
+    [[nodiscard]] std::uint8_t* recall_staging_bytes() noexcept
+    {
+        return reinterpret_cast<std::uint8_t*>(workspace_.dma.samples);
+    }
+    [[nodiscard]] const std::uint8_t* recall_staging_bytes() const noexcept
+    {
+        return reinterpret_cast<const std::uint8_t*>(workspace_.dma.samples);
+    }
     [[nodiscard]] bool begin_spectrum_workspace(std::int32_t*& words) noexcept;
     void end_spectrum_workspace() noexcept;
     [[nodiscard]] bool begin_recall_staging() noexcept;

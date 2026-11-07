@@ -1,28 +1,17 @@
 #ifndef DSO_CAPTURE_HPP
 #define DSO_CAPTURE_HPP
 
+#include "dso_adc_codes.hpp"
+#include "dso_capture_config.hpp"
+#include "dso_trigger.hpp"
+
 #include <cstddef>
 #include <cstdint>
-#include "dso_trigger.hpp"
 
 namespace dso {
 
-inline constexpr std::uint16_t CaptureCapacity = 1024U;
-inline constexpr std::uint16_t AdcMax = 4095U;
-
 enum class CaptureState { Stopped, Armed, Posttrigger, Ready, Fault };
-enum class TriggerMode { Normal, Auto, Single };
 enum class CaptureFault { None, SequenceGap, InvalidSample };
-
-struct CaptureConfig final {
-    std::uint16_t length;       // 1..1024, including the trigger sample.
-    std::uint16_t pretrigger;   // 0..length-1; crossing is at this index.
-    std::uint16_t level;        // Raw ADC codes; no board gain assumption.
-    std::uint16_t hysteresis;   // Rearming distance from level.
-    TriggerMode mode;
-    TriggerEdge edge;
-    std::uint32_t auto_timeout_samples; // >=pretrigger+1 in Auto; otherwise unused.
-};
 
 // Foreground-owned static storage. ISRs/DMA never access this object. A record
 // stays immutable in Ready until explicit arm/stop. Single and Normal both wait

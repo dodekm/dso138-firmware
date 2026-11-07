@@ -7,12 +7,7 @@
 #ifndef DSO_BOARD_USB
 #define DSO_BOARD_USB 0
 #endif
-#ifndef DSO_USB_STOCK_BENCH_TRIAL
-#define DSO_USB_STOCK_BENCH_TRIAL 0
-#endif
 static_assert(DSO_BOARD_USB == 0 || DSO_BOARD_USB == 1, "Invalid USB profile");
-static_assert(DSO_USB_STOCK_BENCH_TRIAL == 0 || DSO_USB_STOCK_BENCH_TRIAL == 1,
-              "Invalid stock USB bench-trial profile");
 static_assert(!DSO_BOARD_USB || (DSO_BOARD_BRINGUP && DSO_BOARD_ACQUISITION),
               "USB requires the identity-bound classic board profile");
 

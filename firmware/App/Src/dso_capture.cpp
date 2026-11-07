@@ -1,4 +1,5 @@
 #include "dso_capture.hpp"
+#include "dso_adc_codes.hpp"
 #include <cstdint>
 
 namespace dso {

@@ -1,4 +1,6 @@
 #include "dso_panel_sampler.hpp"
+#include "dso_adc_codes.hpp"
+#include "dso_u32_counter.hpp"
 
 namespace dso {
 void PanelSuspension::set_paused(void* context, bool paused) noexcept
@@ -25,11 +27,9 @@ void PanelSuspension::pause(bool paused, bool resynchronize) noexcept
 }
 namespace {
 
-constexpr std::uint32_t HalfRange{0x80000000U};
-
 bool interval_valid(std::uint32_t interval) noexcept
 {
-    return interval > 0U && interval < HalfRange;
+    return interval > 0U && interval < counter_contract::U32HalfRange;
 }
 
 PanelSamplerFault permanent_fault(const PanelSamplerPort& port,
@@ -120,7 +120,8 @@ PanelSamplerUpdate PanelSampler::update(std::uint32_t now_ms,
     }
 
     if (fault_ == PanelSamplerFault::None) {
-        if (observed_time_ && static_cast<std::uint32_t>(now_ms - last_update_) >= HalfRange) {
+        if (observed_time_ && static_cast<std::uint32_t>(now_ms - last_update_) >=
+                                  counter_contract::U32HalfRange) {
             fail(PanelSamplerFault::ClockDiscontinuity);
         }
         observed_time_ = true;
@@ -186,7 +187,7 @@ PanelSamplerUpdate PanelSampler::update(std::uint32_t now_ms,
             return result(PanelSamplerState::Fault, now_ms);
         }
         needs_abort_ = false;
-        if (polled.value > 4095U) {
+        if (polled.value > AdcMax) {
             fail(PanelSamplerFault::InvalidSample);
             return result(PanelSamplerState::Fault, now_ms);
         }

@@ -1,13 +1,17 @@
 #ifndef DSO_DISPLAY_HPP
 #define DSO_DISPLAY_HPP
 
+#include "dso_capture_contract.hpp"
+#include "dso_display_limits.hpp"
+#include "dso_render_types.hpp"
+
 #include <cstdint>
 
 namespace dso {
 
-inline constexpr std::uint16_t DisplayWidth{320U};
-inline constexpr std::uint16_t DisplayHeight{240U};
-inline constexpr std::uint16_t DisplayMaxSamples{1024U};
+// Preserve the 2.0.2 display-header name; new sample validation uses
+// CaptureCapacity from the capture configuration contract.
+inline constexpr std::uint16_t DisplayMaxSamples{capture_contract::MaximumSamples};
 inline constexpr std::uint16_t DisplayBurstPixels{64U};
 #if defined(DSO_DISPLAY_DMA_PIXELS)
 inline constexpr std::uint16_t DisplayDmaPixels{DSO_DISPLAY_DMA_PIXELS};
@@ -137,16 +141,5 @@ private:
     TransferState transfer_{TransferState::Idle};
 };
 
-enum class RenderState : std::uint8_t { Idle, Drawing, Complete, Cancelled, Fault };
-struct RenderBudget final {
-    std::uint16_t pixels;
-    std::uint16_t transactions;
-};
-struct RenderStep final {
-    RenderState state;
-    std::uint16_t pixels;       // Requested pixel work; a fault may write only part.
-    std::uint16_t transactions; // Attempted transactions, including a failed one.
-    bool completed{};           // One completion event, including zero-pixel polls.
-};
 } // namespace dso
 #endif

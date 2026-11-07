@@ -1,4 +1,8 @@
 #include "spectrum.hpp"
+#include "capture_model.hpp"
+#include "instrument_codes.hpp"
+#include "dso_adc_contract.hpp"
+#include "dso_capture_contract.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,9 +14,7 @@ namespace dso
 namespace
 {
 
-constexpr std::size_t maximumSamples = 1024U;
 constexpr std::size_t maximumPeaks = 8U;
-constexpr std::uint16_t maximumAdcCode = 4095U;
 
 std::size_t nextPowerOfTwo(std::size_t value)
 {
@@ -190,7 +192,8 @@ SpectrumResult analyzeSpectrum(const Capture &capture, SpectrumWindow window,
                                SpectrumDcPolicy dcPolicy, std::size_t peakLimit)
 {
     SpectrumResult result;
-    if (!validateCapture(capture) || capture.raw.empty() || capture.raw.size() > maximumSamples ||
+    if (!validateCapture(capture) || capture.raw.empty() ||
+        capture.raw.size() > capture_contract::MaximumSamples ||
         capture.metadata.timerHz == 0U || capture.metadata.divider == 0U)
     {
         return result;
@@ -201,7 +204,8 @@ SpectrumResult analyzeSpectrum(const Capture &capture, SpectrumWindow window,
     result.sampleRateHz = static_cast<double>(capture.metadata.timerHz) / capture.metadata.divider;
     result.binSpacingHz = result.sampleRateHz / static_cast<double>(result.fftSize);
     result.dcRemoved = dcPolicy == SpectrumDcPolicy::Remove;
-    result.calibrationAvailable = capture.metadata.calibrationKind != 0U;
+    result.calibrationAvailable = capture.metadata.calibrationKind !=
+                                  instrument_code::code(instrument_code::CalibrationKind::Unavailable);
 
     std::vector<double> weights(result.sampleCount);
     double weightSum = 0.0;
@@ -225,7 +229,7 @@ SpectrumResult analyzeSpectrum(const Capture &capture, SpectrumWindow window,
     }
     for (const std::uint16_t code : capture.raw)
     {
-        if (code == 0U || code == maximumAdcCode)
+        if (code == 0U || code == adc_contract::MaximumCode)
         {
             result.status = SpectrumStatus::Clipped;
         }

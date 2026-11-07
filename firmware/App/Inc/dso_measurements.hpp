@@ -1,7 +1,10 @@
 #ifndef DSO_MEASUREMENTS_HPP
 #define DSO_MEASUREMENTS_HPP
 
-#include "dso_scaling.hpp"
+#include "dso_frame_metadata.hpp"
+#include "dso_voltage_calibration.hpp"
+
+#include <cstdint>
 
 namespace dso {
 

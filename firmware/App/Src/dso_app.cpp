@@ -2,13 +2,16 @@
 #include "dso_board_bringup.hpp"
 #include "dso_bringup_publication.hpp"
 #include "dso_acquisition.hpp"
+#include "dso_front_panel.hpp"
 #include "dso_panel_sampler.hpp"
 #include "dso_stm32_acquisition.hpp"
 #include "dso_trigger_led.hpp"
 #include "dso_stm32_panel.hpp"
 #include "dso_stm32_display.hpp"
+#include "dso_scope_screen.hpp"
 #include "dso_stm32_analog_power.hpp"
 #include "dso_stm32_storage.hpp"
+#include "dso_scope_storage.hpp"
 #include "dso_timebase.hpp"
 #include "dso_ui_controller.hpp"
 #include "dso_usb_board.hpp"
@@ -181,12 +184,15 @@ extern "C" void dso_app_init(void)
         adc_hz != 12000000U ||
         !dso::plan_timebase(timer_hz, adc_hz, 15U, 500000U, &plan) ||
         plan.prescaler != 0U || plan.period != 143U) {
-        dso_app_fault(1U);
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_CLOCK_OR_TIMING));
         return;
     }
 
 #if DSO_BOARD_BRINGUP
-    if (!dso::activate_bringup_board(display)) { dso_app_fault(7U); return; }
+    if (!dso::activate_bringup_board(display)) {
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_BOARD_ACTIVATION));
+        return;
+    }
     dso::initialize_stm32_trigger_led();
 #if DSO_BOARD_STORAGE
     // UID and flash size have now passed the board activation gate. This is
@@ -205,7 +211,8 @@ extern "C" void dso_app_init(void)
     if (dso::prepare_stm32_display(DormantDisplayQualification) ||
         dso::stm32_display_state() != dso::Stm32DisplayState::Dormant ||
         dso::stm32_display_fault() != dso::Stm32DisplayFault::Qualification) {
-        dso_app_fault(4U); return;
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_DORMANT_DISPLAY_GUARD));
+        return;
     }
     // This immutable API table retains the shared-TIM4 owner for inspection.
     // False permissions revoke RAM authority only: PB8/PB9 remain untouched.
@@ -214,7 +221,8 @@ extern "C" void dso_app_init(void)
         analog_power.state() != dso::Stm32AnalogPowerState::Unqualified ||
         analog_power.fault() != dso::Stm32AnalogPowerFault::Qualification ||
         analog_power.carrier_may_be_active()) {
-        dso_app_fault(5U); return;
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_DORMANT_ANALOG_POWER_GUARD));
+        return;
     }
     // Retain the auditable Flash adapter, but grant no access. The journal
     // above still has an empty port and board identity zero independently.
@@ -222,7 +230,8 @@ extern "C" void dso_app_init(void)
     if (storage.prepare(0U, DormantStorageQualification) ||
         storage.state() != dso::Stm32StorageState::Dormant ||
         storage.fault() != dso::Stm32StorageFault::Qualification) {
-        dso_app_fault(6U); return;
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_DORMANT_STORAGE_GUARD));
+        return;
     }
 #endif
     dso_bench_status.system_clock_hz = HAL_RCC_GetSysClockFreq();
@@ -239,7 +248,10 @@ extern "C" void dso_app_init(void)
     static_cast<void>(usb_device.start(dso::UsbBoardQualification));
 #endif
 #if DSO_BOARD_ACQUISITION
-    if (!panel_sampler.start()) { dso_app_fault(8U); return; }
+    if (!panel_sampler.start()) {
+        dso_app_fault(static_cast<std::uint32_t>(DSO_APP_FAULT_PANEL_SAMPLER_START));
+        return;
+    }
     dso::dso_bringup_acquisition.ready_ms = HAL_GetTick();
 #endif
     dso_bench_status.phase = DSO_BENCH_WAITING_FOR_HARDWARE;

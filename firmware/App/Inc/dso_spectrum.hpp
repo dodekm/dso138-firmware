@@ -2,11 +2,14 @@
 #define DSO_SPECTRUM_HPP
 
 #include "dso_fft.hpp"
-#include "dso_scaling.hpp"
+#include "dso_projection_limits.hpp"
 
 #include <cstdint>
 
 namespace dso {
+
+struct FrameMetadata;
+struct WaveformProjection;
 
 inline constexpr std::uint16_t SpectrumLength{512U};
 inline constexpr std::uint16_t SpectrumPlotWidth{280U};
